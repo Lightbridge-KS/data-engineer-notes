@@ -18,8 +18,11 @@ bibliography: references.bib
 
 format:
   html:
+    lightbox: true
     theme:
-      - cosmo
-      - brand
+      light:
+        - simplex
+      dark:
+        - darkly
 
 
