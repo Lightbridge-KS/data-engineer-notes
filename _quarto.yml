@@ -1,0 +1,25 @@
+project:
+  type: book
+
+book:
+  title: "Data Engineer Notes"
+  author: "Kittipos Sirivongrungson"
+  repo-url: https://github.com/Lightbridge-KS/data-engineer-notes
+  site-url: https://data-engineer-notes-lightbridge.netlify.app
+  date: today
+  chapters:
+    - index.qmd
+    - part: Data Solution
+      chapters: 
+        - text: OLAP for Radiology
+          href: "contents/data_architect/OLAP-radiology-architect.qmd"
+
+bibliography: references.bib
+
+format:
+  html:
+    theme:
+      - cosmo
+      - brand
+
+

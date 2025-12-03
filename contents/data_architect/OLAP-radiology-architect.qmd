@@ -1,0 +1,373 @@
+---
+title: Data Architecture Recommendation for Radiology Analytics
+---
+
+Given your context—a hospital radiology department with mixed data sources (PACS, RIS, EMR), research needs (OMOP CDM), and AI/ML aspirations—I recommend a **Data Lakehouse** architecture with a **Medallion** layer pattern.
+
+Let me walk you through the reasoning and design.
+
+
+## Why Data Lakehouse?
+
+Here's a quick comparison of your options:
+
+```
+┌─────────────────────┬───────────────┬───────────────┬────────────────┬───────────────┐
+│ Criteria            │ Relational DW │ Modern DW     │ Data Lake      │ Data Lakehouse│
+├─────────────────────┼───────────────┼───────────────┼────────────────┼───────────────┤
+│ Structured Data     │ ★★★★★         │ ★★★★★         │ ★★★            │ ★★★★★         │
+│ Unstructured (DICOM)│ ★             │ ★★            │ ★★★★★          │ ★★★★★         │
+│ Schema Enforcement  │ ★★★★★         │ ★★★★          │ ★              │ ★★★★          │
+│ ML/AI Workloads     │ ★★            │ ★★★           │ ★★★★★          │ ★★★★★         │
+│ OMOP CDM Fit        │ ★★★★          │ ★★★★          │ ★★★            │ ★★★★★         │
+│ Cost Efficiency     │ ★★            │ ★★★           │ ★★★★★          │ ★★★★          │
+│ Complexity          │ Low           │ Medium        │ High           │ Medium        │
+└─────────────────────┴───────────────┴───────────────┴────────────────┴───────────────┘
+```
+
+**Key reasons for Lakehouse:**
+
+1. **Dual nature of radiology data** — You have structured (RIS metadata, EMR) and unstructured (DICOM images, PDF reports) that need unified management.
+
+2. **Research + Operations** — OMOP CDM requires relational semantics, while AI training needs raw image access. Lakehouse supports both.
+
+3. **Future-proof** — Your AI unit will likely scale to larger datasets; lakehouse handles petabyte-scale gracefully.
+
+
+## Proposed Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              DATA LAKEHOUSE ARCHITECTURE                            │
+│                              (Medallion Pattern + OMOP)                             │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
+    │    PACS     │   │ RIS (MSSQL) │   │     EMR     │
+    │   (DICOM)   │   │  Read-Only  │   │             │
+    └──────┬──────┘   └──────┬──────┘   └──────┬──────┘
+           │                 │                 │
+           ▼                 ▼                 ▼
+    ╔═════════════════════════════════════════════════════════════════════════════════╗
+    ║                           INGESTION LAYER                                       ║
+    ║  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  ║
+    ║  │ DICOM Listener  │  │  CDC / ETL      │  │  API / HL7      │                  ║
+    ║  │(Orthanc/dcm4che)│  │ (Debezium/SSIS) │  │  FHIR Gateway   │                  ║
+    ║  └─────────────────┘  └─────────────────┘  └─────────────────┘                  ║
+    ╚═════════════════════════════════════════════════════════════════════════════════╝
+                                       │
+                                       ▼
+    ╔════════════════════════════════════════════════════════════════════════════════╗
+    ║                         STORAGE LAYER (Data Lake)                              ║
+    ║                                                                                ║
+    ║  ┌─────────────────────────────────────────────────────────────────────────┐   ║
+    ║  │  BRONZE (Raw)                                                           │   ║
+    ║  │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐         │   ║
+    ║  │  │ raw_dicom/ │  │ raw_ris/   │  │ raw_emr/   │  │ raw_reports│         │   ║
+    ║  │  │ (Parquet + │  │ (Parquet)  │  │ (Parquet)  │  │ (PDF/Text) │         │   ║
+    ║  │  │  DICOM)    │  │            │  │            │  │            │         │   ║
+    ║  │  └────────────┘  └────────────┘  └────────────┘  └────────────┘         │   ║
+    ║  └─────────────────────────────────────────────────────────────────────────┘   ║
+    ║                                     │                                          ║
+    ║                                     ▼                                          ║
+    ║  ┌─────────────────────────────────────────────────────────────────────────┐   ║
+    ║  │  SILVER (Cleaned & Conformed)                                           │   ║
+    ║  │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐             │   ║
+    ║  │  │ study_master   │  │ patient_master │  │ procedure_dim  │             │   ║
+    ║  │  │ (Delta/Iceberg)│  │ (Delta/Iceberg)│  │ (Delta/Iceberg)│             │   ║
+    ║  │  └────────────────┘  └────────────────┘  └────────────────┘             │   ║
+    ║  │  ┌────────────────┐  ┌────────────────┐                                 │   ║
+    ║  │  │ report_parsed  │  │ dicom_metadata │                                 │   ║
+    ║  │  │ (NLP extracted)│  │ (tags parsed)  │                                 │   ║
+    ║  │  └────────────────┘  └────────────────┘                                 │   ║
+    ║  └─────────────────────────────────────────────────────────────────────────┘   ║
+    ║                                     │                                          ║
+    ║                                     ▼                                          ║
+    ║  ┌─────────────────────────────────────────────────────────────────────────┐   ║
+    ║  │  GOLD (Business-Ready)                                                  │   ║
+    ║  │                                                                         │   ║
+    ║  │  ┌───────────────────────────────────────────────────────────────────┐  │   ║
+    ║  │  │  OMOP CDM Layer                                                   │  │   ║
+    ║  │  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────┐  │  │   ║
+    ║  │  │  │ PERSON   │ │PROCEDURE │ │ DEVICE   │ │  NOTE    │ │ CONCEPT │  │  │   ║
+    ║  │  │  │_OCCURRENCE│ │_OCCURRENCE│ │_EXPOSURE │ │          │ │          │  │   ║
+    ║  │  │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └─────────┘  │  │   ║
+    ║  │  └───────────────────────────────────────────────────────────────────┘  │   ║
+    ║  │                                                                         │   ║
+    ║  │  ┌───────────────────────────────────────────────────────────────────┐  │   ║
+    ║  │  │  Research Cohorts (Project-Based)                                 │  │   ║
+    ║  │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                │  │   ║
+    ║  │  │  │ cohort_cxr_ │  │ cohort_ct_  │  │ cohort_mri_ │                │  │   ║
+    ║  │  │  │ lung_disease│  │ stroke      │  │ brain_tumor │                │  │   ║
+    ║  │  │  └─────────────┘  └─────────────┘  └─────────────┘                │  │   ║
+    ║  │  └───────────────────────────────────────────────────────────────────┘  │   ║
+    ║  │                                                                         │   ║
+    ║  │  ┌───────────────────────────────────────────────────────────────────┐  │   ║
+    ║  │  │  Analytics Marts                                                  │  │   ║
+    ║  │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                │  │   ║
+    ║  │  │  │ mart_       │  │ mart_       │  │ mart_       │                │  │   ║
+    ║  │  │  │ turnaround  │  │ modality_   │  │ radiologist_│                │  │   ║
+    ║  │  │  │ _time       │  │ utilization │  │ productivity│                │  │   ║
+    ║  │  │  └─────────────┘  └─────────────┘  └─────────────┘                │  │   ║
+    ║  │  └───────────────────────────────────────────────────────────────────┘  │   ║
+    ║  └─────────────────────────────────────────────────────────────────────────┘   ║
+    ╚═════════════════════════════════════════════════════════════════════════════════╝
+                                       │
+                                       ▼
+    ╔═════════════════════════════════════════════════════════════════════════════════╗
+    ║                          CONSUMPTION LAYER                                      ║
+    ║  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             ║
+    ║  │ BI / Dashb. │  │ SQL Query   │  │ ML Training │  │ OHDSI Tools │             ║
+    ║  │ (Power BI)  │  │ (DBeaver)   │  │ (Python/R)  │  │ (ATLAS)     │             ║
+    ║  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘             ║
+    ╚═════════════════════════════════════════════════════════════════════════════════╝
+```
+
+
+## Layer-by-Layer Explanation
+
+
+### Bronze Layer (Raw Data)
+
+Store data in its original form with minimal transformation—just format conversion for queryability.
+
+| Source | Bronze Table | Format | Notes |
+|--------|--------------|--------|-------|
+| PACS | `raw_dicom/` | DICOM files + Parquet metadata | Keep original DICOM, extract tags to Parquet |
+| RIS | `raw_ris_*` | Parquet (Delta) | CDC snapshots from sync DB |
+| EMR | `raw_emr_*` | Parquet (Delta) | HL7/FHIR messages or table extracts |
+| Reports | `raw_reports/` | PDF + extracted text | Preserve original PDF |
+
+
+### Silver Layer (Cleaned & Conformed)
+
+Apply business rules, deduplication, and create entity-centric tables.
+
+```
+Key Transformations:
+──────────────────────────────────────────────────────────────
+1. Patient Master (silver.patient_master)
+   - Deduplicate across RIS/EMR
+   - Standardize demographics
+   - Generate surrogate keys
+
+2. Study Master (silver.study_master)
+   - Join DICOM metadata + RIS order info
+   - Calculate derived fields (study completeness, etc.)
+
+3. Report Parsed (silver.report_parsed)
+   - NLP extraction of findings, impressions
+   - Structured fields: laterality, body_part, modality
+──────────────────────────────────────────────────────────────
+```
+
+
+### Gold Layer (Business-Ready)
+
+This is where OMOP CDM and your research cohorts live.
+
+
+#### OMOP CDM Integration
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                     OMOP CDM for Radiology                              │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Core Tables (Standard OMOP):                                           │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐             │
+│  │    PERSON      │  │   VISIT_       │  │  PROCEDURE_    │             │
+│  │                │  │   OCCURRENCE   │  │  OCCURRENCE    │             │
+│  │ - person_id    │  │ - visit_id     │  │ - procedure_id │             │
+│  │ - gender       │  │ - visit_date   │  │ - procedure_   │             │
+│  │ - birth_date   │  │ - visit_type   │  │   concept_id   │             │
+│  │ - location_id  │  │                │  │ - CPT/ICD codes│             │
+│  └───────┬────────┘  └───────┬────────┘  └───────┬────────┘             │
+│          │                   │                   │                      │
+│          └───────────────────┴───────────────────┘                      │
+│                              │                                          │
+│  Radiology Extensions:       ▼                                          │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐             │
+│  │  DEVICE_       │  │    NOTE        │  │  NOTE_NLP      │             │
+│  │  EXPOSURE      │  │                │  │  (Custom Ext)  │             │
+│  │                │  │ - note_text    │  │                │             │
+│  │ - device_type  │  │ - note_type    │  │ - finding      │             │
+│  │   (CT, MRI,    │  │   (radiology   │  │ - impression   │             │
+│  │    X-ray)      │  │    report)     │  │ - body_part    │             │
+│  │ - dose (mSv)   │  │                │  │ - laterality   │             │
+│  └────────────────┘  └────────────────┘  └────────────────┘             │
+│                                                                         │
+│  Vocabulary Mapping:                                                    │
+│  ┌──────────────────────────────────────────────────────────┐           │
+│  │  Local Code  →  OMOP Standard Concept                    │           │
+│  │  ─────────────────────────────────────────────────────   │           │
+│  │  "CT_CHEST"  →  concept_id: 4046360 (CT of chest)        │           │
+│  │  "MRI_BRAIN" →  concept_id: 4023190 (MRI of brain)       │           │
+│  │  RadLex codes → mapped to SNOMED CT                      │           │
+│  └──────────────────────────────────────────────────────────┘           │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+
+#### Research Cohorts Structure
+
+```python
+# Example: Cohort Definition for CXR Lung Disease Dataset
+cohort_cxr_lung_disease/
+├── cohort_definition.json      # Inclusion/exclusion criteria
+├── cohort_patients.parquet     # person_id list
+├── labels/
+│   ├── pneumonia.parquet       # Ground truth labels
+│   ├── cardiomegaly.parquet
+│   └── effusion.parquet
+├── features/
+│   └── dicom_paths.parquet     # Links to Bronze DICOM files
+└── splits/
+    ├── train.parquet
+    ├── val.parquet
+    └── test.parquet
+```
+
+
+## Technology Stack Recommendation
+
+Given your existing MS SQL Server expertise and hospital environment:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    RECOMMENDED TECHNOLOGY STACK                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Option A: Cloud-Native (Azure-Based)                                   │
+│  ─────────────────────────────────────                                  │
+│  Storage:        Azure Data Lake Storage Gen2 (ADLS)                    │
+│  Table Format:   Delta Lake                                             │
+│  Compute:        Azure Synapse Analytics / Databricks                   │
+│  Orchestration:  Azure Data Factory                                     │
+│  BI:             Power BI                                               │
+│  OMOP Tools:     OHDSI ATLAS (Azure VM)                                 │
+│                                                                         │
+│  Pros: Integrates well with MS SQL Server, enterprise support           │
+│  Cons: Higher cost, cloud dependency                                    │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Option B: On-Premise / Hybrid (Recommended for Hospital)               │
+│  ─────────────────────────────────────────────────────────              │
+│  Storage:        MinIO (S3-compatible) or NAS                           │
+│  Table Format:   Apache Iceberg or Delta Lake                           │
+│  Compute:        Apache Spark (standalone) or DuckDB (small scale)      │
+│  Orchestration:  Apache Airflow                                         │
+│  SQL Engine:     Trino / DuckDB                                         │
+│  BI:             Apache Superset / Metabase                             │
+│  OMOP Tools:     OHDSI ATLAS (Docker)                                   │
+│                                                                         │
+│  Pros: Data sovereignty, lower ongoing cost, HIPAA control              │
+│  Cons: More infrastructure management                                   │
+│                                                                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  Option C: Pragmatic Start (Your Existing Stack + Extensions)           │
+│  ─────────────────────────────────────────────────────────────          │
+│  Storage:        MS SQL Server (existing) + File Server for DICOM       │
+│  Lakehouse:      DuckDB + Parquet files                                 │
+│  Orchestration:  Python scripts + cron / Windows Task Scheduler         │
+│  BI:             Power BI (likely already licensed)                     │
+│  OMOP:           PostgreSQL (OHDSI standard)                            │
+│                                                                         │
+│  Pros: Fast to implement, low learning curve                            │
+│  Cons: May need migration later as data grows                           │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+
+## Implementation Roadmap
+
+```
+Phase 1 (Month 1-2): Foundation
+───────────────────────────────────────────────────────────────
+  □ Set up storage layer (MinIO/ADLS or file server)
+  □ Establish Bronze layer for RIS data (CDC from sync DB)
+  □ Extract DICOM metadata to Parquet
+  □ Basic orchestration (Airflow/Python scripts)
+
+Phase 2 (Month 3-4): Silver Layer + OMOP Foundation
+───────────────────────────────────────────────────────────────
+  □ Build Silver transformations (patient/study master)
+  □ Install OMOP vocabulary tables
+  □ Create mapping tables (local codes → OMOP concepts)
+  □ Set up SQL query engine (Trino/DuckDB)
+
+Phase 3 (Month 5-6): Gold Layer + First Cohort
+───────────────────────────────────────────────────────────────
+  □ Populate core OMOP tables (PERSON, PROCEDURE_OCCURRENCE)
+  □ Build first research cohort (e.g., CXR Lung Disease)
+  □ Deploy ATLAS for cohort exploration
+  □ Create operational analytics marts
+
+Phase 4 (Month 7+): ML Integration + Expansion
+───────────────────────────────────────────────────────────────
+  □ Feature store integration for ML pipelines
+  □ Additional cohorts (CT Stroke, MRI Brain)
+  □ NLP pipeline for report parsing
+  □ Dashboard deployment
+```
+
+
+## Key Considerations for Ramathibodi
+
+
+### Data Governance & Privacy
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Privacy Layers                                                         │
+│  ──────────────────────────────────────────────────────────────────     │
+│                                                                         │
+│  Bronze:  May contain PHI (Protected Health Information)                │
+│           → Restricted access, audit logging                            │
+│                                                                         │
+│  Silver:  De-identified or pseudonymized                                │
+│           → Replace HN with surrogate keys                              │
+│           → Hash identifiers                                            │
+│                                                                         │
+│  Gold:    Project-specific access controls                              │
+│           → IRB approval linked to cohort access                        │
+│           → Data use agreements enforced                                │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+
+### DICOM Handling Strategy
+
+Since DICOM files are large and complex:
+
+```
+Recommendation:
+──────────────────────────────────────────────────────────────
+1. Store original DICOM in object storage (Bronze)
+2. Extract metadata tags to Parquet for fast querying
+3. Generate derived formats for ML:
+   - PNG/JPG for preview
+   - NIfTI for volumetric analysis
+   - NumPy arrays for training
+4. Link via study_instance_uid across all layers
+```
+
+
+## Questions to Consider
+
+Before finalizing, consider these:
+
+1. **Data volume**: How many studies/year? This affects whether DuckDB suffices or you need Spark.
+
+2. **Real-time needs**: Do you need near-real-time analytics, or is daily/weekly batch sufficient?
+
+3. **Cloud policy**: Does Ramathibodi allow cloud storage for research data, or must it be on-premise?
+
+4. **Existing BI tools**: Do you have Power BI licenses? This influences the consumption layer choice.
+
+5. **Team skills**: Who will maintain this? This affects the complexity you should target.
