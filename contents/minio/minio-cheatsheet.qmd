@@ -1,0 +1,440 @@
+# MinIO CLI Cheatsheet
+
+
+## Quick Reference Structure
+
+
+```
+mc [command] [alias]/[bucket]/[path] [options]
+    │           │        │       │
+    │           │        │       └─── Object path (optional)
+    │           │        └─────────── Bucket name (optional)
+    │           └──────────────────── Server alias (required)
+    └──────────────────────────────── Action to perform
+```
+
+
+## Alias Management
+
+
+```zsh
+# Add a server alias
+mc alias set <alias> <url> <access-key> <secret-key>
+mc alias set local http://localhost:9000 minioadmin minioadmin
+
+# List all aliases
+mc alias list
+
+# Remove an alias
+mc alias remove <alias>
+
+# Test connection
+mc admin info <alias>
+```
+
+
+## Bucket Operations
+
+
+### Create & Delete
+
+```zsh
+# Create bucket
+mc mb <alias>/<bucket-name>
+mc mb local/my-bucket
+
+# Remove empty bucket
+mc rb <alias>/<bucket-name>
+mc rb local/my-bucket
+
+# Remove bucket and all contents (dangerous!)
+mc rb --force <alias>/<bucket-name>
+mc rb --force local/my-bucket
+```
+
+
+### List Buckets
+
+```zsh
+# List all buckets
+mc ls <alias>/
+mc ls local/
+
+# List with details (size, date)
+mc ls --recursive local/
+```
+
+
+## Object Operations
+
+
+### Upload Files
+
+```zsh
+# Upload single file
+mc cp <local-path> <alias>/<bucket>/<object-path>
+mc cp ~/data.csv local/my-bucket/data.csv
+
+# Upload directory (recursive)
+mc cp --recursive ~/my-folder/ local/my-bucket/folder/
+
+# Upload with progress bar
+mc cp --progress ~/large-file.zip local/my-bucket/
+```
+
+
+### Download Files
+
+```zsh
+# Download single file
+mc cp <alias>/<bucket>/<object-path> <local-path>
+mc cp local/my-bucket/data.csv ~/Downloads/
+
+# Download directory (recursive)
+mc cp --recursive local/my-bucket/folder/ ~/Downloads/
+
+# Download specific file version
+mc cp --version-id <version-id> local/my-bucket/file.txt ~/
+```
+
+
+### Copy & Move
+
+
+```zsh
+# Copy within same server
+mc cp local/bucket1/file.txt local/bucket2/file.txt
+
+# Copy between servers
+mc cp local/bucket/file.txt prod/backup/file.txt
+
+# Move (rename) object
+mc mv local/bucket/old-name.txt local/bucket/new-name.txt
+
+# Move between buckets
+mc mv local/bucket1/file.txt local/bucket2/file.txt
+```
+
+
+### Delete Objects
+
+```zsh
+# Delete single object
+mc rm <alias>/<bucket>/<object>
+mc rm local/my-bucket/old-file.txt
+
+# Delete multiple objects (recursive)
+mc rm --recursive local/my-bucket/folder/
+
+# Delete with confirmation
+mc rm --force local/my-bucket/important-file.txt
+
+# Delete all objects but keep bucket
+mc rm --recursive --force local/my-bucket/
+```
+
+
+## Listing & Searching
+
+
+### List Objects
+
+```zsh
+# List objects in bucket
+mc ls <alias>/<bucket>/
+mc ls local/my-bucket/
+
+# List recursively (all nested objects)
+mc ls --recursive local/my-bucket/
+
+# List with details
+mc ls --recursive --summarize local/my-bucket/
+
+# List objects with size in human-readable format
+mc ls --recursive --human-readable local/my-bucket/
+```
+
+
+### Find Objects
+
+```zsh
+# Find by name pattern
+mc find <alias>/<bucket> --name "*.jpg"
+mc find local/radiology-data --name "patient_*"
+
+# Find by size (larger than 10MB)
+mc find local/my-bucket --larger 10M
+
+# Find by size (smaller than 1MB)
+mc find local/my-bucket --smaller 1M
+
+# Find modified after date
+mc find local/my-bucket --newer-than 7d
+
+# Find and execute command
+mc find local/my-bucket --name "*.tmp" --exec "mc rm {}"
+```
+
+
+## Synchronization
+
+
+### Mirror (Sync)
+
+```zsh
+# Sync local to MinIO (upload)
+mc mirror <local-path> <alias>/<bucket>
+mc mirror ~/my-data/ local/my-bucket/
+
+# Sync MinIO to local (download)
+mc mirror <alias>/<bucket> <local-path>
+mc mirror local/my-bucket/ ~/backup/
+
+# Sync with deletion (remove destination files not in source)
+mc mirror --remove local/source/ local/destination/
+
+# Sync only newer files
+mc mirror --overwrite local/source/ local/destination/
+
+# Dry run (preview changes)
+mc mirror --dry-run ~/my-data/ local/my-bucket/
+```
+
+
+### Watch for Changes
+
+```zsh
+# Watch for new objects
+mc watch <alias>/<bucket>
+mc watch local/my-bucket/
+
+# Watch and execute command on new objects
+mc watch local/uploads/ --exec "python process.py {}"
+```
+
+
+## Access Control & Policies
+
+
+### Bucket Policies
+
+```zsh
+# Make bucket publicly readable
+mc anonymous set download <alias>/<bucket>
+mc anonymous set download local/public-datasets/
+
+# Make bucket public (read/write)
+mc anonymous set public local/public-bucket/
+
+# Make bucket private
+mc anonymous set private local/my-bucket/
+
+# Get current policy
+mc anonymous get local/my-bucket/
+
+# Set custom policy from JSON file
+mc anonymous set-json policy.json local/my-bucket/
+```
+
+
+### Access Keys (Users)
+
+```zsh
+# Create service account (access key)
+mc admin user add <alias> <username> <password>
+mc admin user add local myuser mypassword
+
+# List users
+mc admin user list local
+
+# Disable/enable user
+mc admin user disable local myuser
+mc admin user enable local myuser
+
+# Remove user
+mc admin user remove local myuser
+```
+
+
+## Versioning
+
+
+```zsh
+# Enable versioning
+mc version enable <alias>/<bucket>
+mc version enable local/my-bucket
+
+# Disable versioning
+mc version suspend local/my-bucket
+
+# Check versioning status
+mc version info local/my-bucket
+
+# List all versions of an object
+mc ls --versions local/my-bucket/file.txt
+
+# Download specific version
+mc cp --version-id <version-id> local/my-bucket/file.txt ~/
+```
+
+
+## Object Metadata & Tags
+
+
+```zsh
+# View object metadata
+mc stat <alias>/<bucket>/<object>
+mc stat local/my-bucket/file.txt
+
+# Copy with custom metadata
+mc cp --attr "content-type=image/jpeg" image.jpg local/bucket/
+
+# Set object tags
+mc tag set local/my-bucket/file.txt "dept=radiology" "type=dicom"
+
+# Get object tags
+mc tag list local/my-bucket/file.txt
+
+# Remove object tags
+mc tag remove local/my-bucket/file.txt
+```
+
+
+## Administration
+
+
+### Server Info
+
+```zsh
+# Server information
+mc admin info <alias>
+mc admin info local
+
+# Service status
+mc admin service status local
+
+# Restart server
+mc admin service restart local
+```
+
+
+### Storage Usage
+
+```zsh
+# Disk usage by bucket
+mc du <alias>/<bucket>
+mc du local/my-bucket/
+
+# Disk usage summary
+mc du --depth 1 local/my-bucket/
+```
+
+
+## Advanced Operations
+
+
+### Pipe & Stream
+
+```zsh
+# Pipe to MinIO
+cat data.json | mc pipe local/my-bucket/data.json
+
+# Stream from MinIO
+mc cat local/my-bucket/data.json
+
+# Download and decompress
+mc cat local/backup/data.tar.gz | tar -xz
+```
+
+
+### Concatenate
+
+```zsh
+# View file content
+mc cat <alias>/<bucket>/<object>
+mc cat local/logs/app.log
+
+# View multiple files
+mc cat local/logs/*.log
+
+# View first N bytes
+mc head -n 100 local/my-bucket/file.txt
+
+# View last N bytes
+mc tail -n 100 local/my-bucket/file.txt
+```
+
+
+### Diff
+
+```zsh
+# Compare two locations
+mc diff <alias1>/<bucket1> <alias2>/<bucket2>
+mc diff local/bucket1/ local/bucket2/
+```
+
+
+## Useful Patterns for Radiology Data
+
+
+```zsh
+# Upload DICOM studies organized by patient
+mc mirror ~/dicom-raw/ local/radiology-data/dicom-raw/
+
+# Find all CT scans
+mc find local/radiology-data --name "*CT*"
+
+# Backup with versioning
+mc version enable local/radiology-data
+mc mirror ~/active-studies/ local/radiology-data/studies/
+
+# Sync predictions to storage
+mc mirror ~/ai-predictions/ local/radiology-data/predictions/ --remove
+
+# Watch for new uploads and trigger processing
+mc watch local/radiology-data/incoming/ --exec "python process_dicom.py {}"
+
+# Create organized structure
+mc mb local/radiology-data/raw
+mc mb local/radiology-data/preprocessed
+mc mb local/radiology-data/annotations
+mc mb local/radiology-data/models
+```
+
+
+## Common Options (Work with Most Commands)
+
+
+```
+--recursive, -r          Apply to all objects recursively
+--force                  Force operation without confirmation
+--quiet                  Suppress output
+--json                   Output in JSON format
+--help, -h              Show help
+--version-id <id>       Operate on specific version
+--attr <key=value>      Set custom attributes
+--insecure              Skip SSL certificate verification (dev only)
+```
+
+
+## Quick Examples
+
+
+```zsh
+# Complete backup workflow
+mc mb local/backups
+mc version enable local/backups
+mc mirror ~/important-data/ local/backups/data/
+
+# Upload large dataset with progress
+mc cp --recursive --progress ~/medical-images/ local/datasets/
+
+# Find and delete old temporary files
+mc find local/temp/ --older-than 30d --exec "mc rm {}"
+
+# Copy production data to staging
+mc cp --recursive prod/data/ staging/data/
+
+# Check what changed before syncing
+mc mirror --dry-run ~/local-data/ local/remote-data/
+```
