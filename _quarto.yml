@@ -18,6 +18,10 @@ book:
     - part: MinIO
       chapters: 
         - "contents/minio/minio-cheatsheet.qmd"
+    - part: Usecases
+      chapters: 
+        - text: Exchange Zone Brainstorm
+          href: "contents/exchange-zone/rama-exchange-zone.qmd"
 
 bibliography: references.bib
 

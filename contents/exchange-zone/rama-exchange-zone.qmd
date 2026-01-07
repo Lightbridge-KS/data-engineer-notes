@@ -1,0 +1,472 @@
+---
+title: "Exchange Zone Design"
+---
+
+
+::: {.callout-note appearance="default" collapse="false"}
+Q: The Radiology AI Unit in my hospital has curated anonymized research data. 
+
+There are about 7 datasets (e.g., stroke, lung cancer, etc.). Each of these stored in OMOP PostgreSQL DB (for tabular data), MongoDB (for annotation file), and Orthanc (for Original anonymized DICOM). 
+
+All of these stored in the hospital servers and already anonymized. 
+
+Now, we've planned to shared this data with Thailand Medical AI Consortium which use "CKAN" as DMS.
+
+We'd like to create an "Exchange Zone" that manage this data sharing to the Consortium.
+
+
+Please help me brainstorm the system design of data-pipeline with data architecture options (e.g., file-based, lake, MDW) and system architecture solutions. Show me the design from a simple solution to the enterprise production-grade solution with medical data governance.
+:::
+
+
+**Conversation:** https://claude.ai/share/8fd47d1a-ac16-44be-bfb2-2f62f0966c18
+
+
+Let me help you design the Exchange Zone with progressive complexity levels. I'll start by understanding your current architecture and then propose solutions from simple to enterprise-grade.
+
+## Your Current Architecture (ASCII Representation)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        RAMA RADIOLOGY AI UNIT                               │
+│                     (Hospital Internal Network)                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────────────────┐                                │
+│  │    Curated Anonymized Datasets          │                                │
+│  │  ┌─────────┐ ┌─────────┐ ┌──────────┐   │                                │
+│  │  │ Stroke  │ │  Lung   │ │ Prostate │   │                                │
+│  │  └────┬────┘ └────┬────┘ └────┬─────┘   │                                │
+│  │       │           │           │   ...   │                                │
+│  └───────┼───────────┼───────────┼─────────┘                                │
+│          │           │           │                                          │
+│          ▼           ▼           ▼                                          │
+│    ┌──────────┐ ┌──────────┐ ┌──────────┐                                   │
+│    │  Table   │ │Annotation│ │ Original │                                   │
+│    │  Format  │ │  (NRRD)  │ │  DICOM   │                                   │
+│    └────┬─────┘ └────┬─────┘ └────┬─────┘                                   │
+│         │            │            │                                         │
+│         ▼            ▼            ▼                                         │
+│    ┌──────────┐ ┌──────────┐ ┌──────────┐                                   │
+│    │  OMOP    │ │ MongoDB  │ │ Orthanc  │                                   │
+│    │PostgreSQL│ │          │ │ (PACS)   │                                   │
+│    └──────────┘ └──────────┘ └──────────┘                                   │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │  ?????
+                                    ▼
+                    ┌───────────────────────────────┐
+                    │   Thailand Medical AI         │
+                    │   Consortium (CKAN DMS)       │
+                    └───────────────────────────────┘
+```
+
+---
+
+## Key Design Considerations for Medical Data Sharing
+
+Before diving into solutions, here are the critical concerns:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                  MEDICAL DATA SHARING CONCERNS                 │
+├────────────────────────────────────────────────────────────────┤
+│                                                                │
+│  1. DATA GOVERNANCE          2. SECURITY                       │
+│     • Re-identification         • Network isolation            │
+│       risk assessment           • Encryption (at rest/transit) │
+│     • Data use agreements       • Access control               │
+│     • Audit trails              • VPN/Private links            │
+│                                                                │
+│  3. DATA QUALITY             4. INTEROPERABILITY               │
+│     • Validation rules          • OMOP CDM compliance          │
+│     • Schema versioning         • FHIR compatibility           │
+│     • Completeness checks       • Standard vocabularies        │
+│                                                                │
+│  5. OPERATIONS               6. LEGAL/COMPLIANCE               │
+│     • Monitoring                • PDPA (Thailand)              │
+│     • Error handling            • IRB approvals                │
+│     • Retry mechanisms          • Data sharing agreements      │
+│                                                                │
+└────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Solution Options: Simple → Enterprise
+
+### LEVEL 1: File-Based Manual Export (Quick Start)
+
+**Best for:** Proof of concept, infrequent sharing, small datasets
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         LEVEL 1: FILE-BASED                             │
+│                    (Manual/Semi-automated Export)                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  RAMA Internal                    Exchange Zone        Consortium       │
+│  ───────────                      ─────────────        ──────────       │
+│                                                                         │
+│  ┌──────────┐    SQL Export      ┌─────────────┐                        │
+│  │OMOP      │ ──────────────────▶│             │                        │
+│  │PostgreSQL│    (CSV/Parquet)   │   Shared    │     SFTP/API           │
+│  └──────────┘                    │   Folder    │ ──────────────────┐    │
+│                                  │             │                   │    │
+│  ┌──────────┐    mongoexport     │  /export/   │                   │    │
+│  │ MongoDB  │ ──────────────────▶│  ├─ tables/ │                   ▼    │
+│  └──────────┘    (JSON/BSON)     │  ├─ annot/  │           ┌──────────┐ │
+│                                  │  └─ dicom/  │           │   CKAN   │ │
+│  ┌──────────┐    DICOMweb/       │             │           │   DMS    │ │
+│  │ Orthanc  │ ──────────────────▶│  + manifest │           └──────────┘ │
+│  └──────────┘    Export          │    .json    │                        │
+│                                  └─────────────┘                        │
+│                                                                         │
+│  Tools: psql, mongoexport, curl (Orthanc REST API)                      │
+│  Scripts: Bash/Python for orchestration                                 │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Implementation Example (Python/Bash):**
+
+```python
+# Simple export script structure
+export_pipeline/
+├── scripts/
+│   ├── export_omop.py      # pg_dump or SQLAlchemy queries
+│   ├── export_mongo.py     # pymongo → JSON/BSON
+│   ├── export_orthanc.py   # REST API calls
+│   └── upload_ckan.py      # CKAN API client
+├── config/
+│   └── datasets.yaml       # Dataset definitions
+└── manifests/
+    └── stroke_v1.json      # Export manifest with checksums
+```
+
+**Pros:** Simple, low infrastructure, quick to implement  
+**Cons:** Manual effort, no audit trail, error-prone, no real-time sync
+
+---
+
+### LEVEL 2: Automated ETL Pipeline with Staging Zone
+
+**Best for:** Regular scheduled sharing, multiple datasets, team collaboration
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      LEVEL 2: AUTOMATED ETL PIPELINE                        │
+│                        (Scheduled + Staging Zone)                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────┐    │
+│  │                    EXCHANGE ZONE (Docker Compose)                   │    │
+│  │                                                                     │    │
+│  │   ┌─────────────────────────────────────────────────────────────┐   │    │
+│  │   │               ORCHESTRATOR (Airflow/Prefect)                │   │    │
+│  │   │                                                             │   │    │
+│  │   │   ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌────────┐   │   │    │
+│  │   │   │Extract  │───▶│Validate │───▶│Transform│───▶│  Load  │   │   │    │
+│  │   │   │  DAG    │    │   DAG   │    │   DAG   │    │  DAG   │   │   │    │
+│  │   │   └─────────┘    └─────────┘    └─────────┘    └────────┘   │   │    │
+│  │   │                                                             │   │    │
+│  │   └─────────────────────────────────────────────────────────────┘   │    │
+│  │                              │                                      │    │
+│  │                              ▼                                      │    │
+│  │   ┌──────────────────────────────────────────────────────────────┐  │    │
+│  │   │                   STAGING STORAGE                            │  │    │
+│  │   │                                                              │  │    │
+│  │   │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐           │  │    │
+│  │   │  │   MinIO     │  │  Postgres   │  │    Redis    │           │  │    │
+│  │   │  │  (S3-like)  │  │  (metadata) │  │   (cache)   │           │  │    │
+│  │   │  │             │  │             │  │             │           │  │    │
+│  │   │  │ /raw/       │  │ • manifests │  │ • job state │           │  │    │
+│  │   │  │ /validated/ │  │ • audit_log │  │ • locks     │           │  │    │
+│  │   │  │ /ready/     │  │ • checksums │  │             │           │  │    │
+│  │   │  └─────────────┘  └─────────────┘  └─────────────┘           │  │    │
+│  │   │                                                              │  │    │
+│  │   └──────────────────────────────────────────────────────────────┘  │    │
+│  │                              │                                      │    │
+│  └──────────────────────────────┼──────────────────────────────────────┘    │
+│                                 │                                           │
+│  ┌──────────────┐               │              ┌──────────────────────┐     │
+│  │ RAMA Sources │───────────────┘              │ CKAN API Gateway     │     │
+│  │ (OMOP/Mongo/ │                              │                      │     │
+│  │  Orthanc)    │                              │ • Upload datasets    │     │
+│  └──────────────┘          /ready/ ──────────▶ │ • Update metadata    │     │
+│                                                │ • Notify consortium  │     │
+│                                                └──────────────────────┘     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Pipeline Stages:**
+
+```
+EXTRACT          VALIDATE           TRANSFORM          LOAD
+────────         ────────           ─────────          ────
+                                    
+• Pull from      • Schema check     • Format           • Push to 
+  OMOP/Mongo/    • Null checks        conversion         CKAN API
+  Orthanc        • PHI re-scan      • Standardize      • Update
+• Incremental    • Referential        vocabularies       metadata
+  extraction       integrity        • Add lineage      • Notify
+• Checksum       • Data quality       metadata           stakeholders
+  calculation      score                               
+                                    
+    ▼                ▼                  ▼                  ▼
+  /raw/          /validated/        /transformed/      /ready/
+```
+
+**Tech Stack:**
+
+```
+┌────────────────────────────────────────────────────┐
+│ Component          │ Options                       │
+├────────────────────┼───────────────────────────────┤
+│ Orchestrator       │ Apache Airflow, Prefect       │
+│ Object Storage     │ MinIO (self-hosted S3)        │
+│ Metadata DB        │ PostgreSQL                    │
+│ Queue/Cache        │ Redis                         │
+│ Containerization   │ Docker Compose                │
+│ CKAN Integration   │ ckanapi (Python)              │
+└────────────────────────────────────────────────────┘
+```
+
+**Pros:** Automated, auditable, reproducible, handles failures  
+**Cons:** More infrastructure, requires DevOps knowledge
+
+---
+
+### LEVEL 3: Data Lake Architecture (Medallion Pattern)
+
+**Best for:** Large datasets, multiple consumers, analytics needs
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    LEVEL 3: DATA LAKE (MEDALLION ARCHITECTURE)                  │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  DATA SOURCES              DATA LAKE                          CONSUMERS         │
+│  ────────────              ─────────                          ─────────         │
+│                                                                                 │
+│  ┌──────────┐         ┌─────────────────────────────────────┐                   │
+│  │OMOP      │         │                                     │                   │
+│  │PostgreSQL│────┐    │  ┌─────────┐  ┌─────────┐  ┌─────┐  │                   │
+│  └──────────┘    │    │  │ BRONZE  │  │ SILVER  │  │GOLD │  │   ┌─────────┐     │
+│                  │    │  │ (Raw)   │─▶│(Cleaned)│─▶│(Pub)│──│──▶│  CKAN   │     │
+│  ┌──────────┐    │    │  │         │  │         │  │     │  │   │  DMS    │     │
+│  │ MongoDB  │────┼───▶│  │ Parquet │  │ Parquet │  │     │  │   └─────────┘     │
+│  └──────────┘    │    │  │ + NRRD  │  │ + JSON  │  │     │  │                   │
+│                  │    │  │ + DICOM │  │         │  │     │  │   ┌─────────┐     │
+│  ┌──────────┐    │    │  └─────────┘  └─────────┘  └─────┘  │──▶│ Internal│     │
+│  │ Orthanc  │────┘    │       │            │          │     │   │Analytics│     │
+│  └──────────┘         │       ▼            ▼          ▼     │   └─────────┘     │
+│                       │  ┌─────────────────────────────────┐│                   │
+│                       │  │       UNITY CATALOG / HIVE      ││   ┌─────────┐     │
+│                       │  │    (Schema + Access Control)    ││──▶│  Future │     │
+│                       │  └─────────────────────────────────┘│   │Partners │     │
+│                       │                                     │   └─────────┘     │
+│                       │  Storage: MinIO / S3 / Azure Blob   │                   │
+│                       │  Engine: DuckDB / Spark / Trino     │                   │
+│                       │  Format: Delta Lake / Apache Iceberg│                   │
+│                       └─────────────────────────────────────┘                   │
+│                                                                                 │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Medallion Layers Explained:**
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         MEDALLION ARCHITECTURE                               │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  BRONZE (Raw)              SILVER (Validated)         GOLD (Published)       │
+│  ─────────────             ──────────────────         ────────────────       │
+│                                                                              │
+│  • Exact copy from         • Schema enforced          • Aggregated views     │
+│    source systems          • PHI re-verified          • CKAN-ready format    │
+│  • Append-only             • Duplicates removed       • Access controlled    │
+│  • Full history            • Quality scored           • Version pinned       │
+│  • All formats             • Standardized vocab       • Documentation        │
+│                                                                              │
+│  Retention: Forever        Retention: 2 years         Retention: Per policy  │
+│  Access: Data Engineers    Access: Data Scientists    Access: Consortium     │
+│                                                                              │
+│  Example paths:            Example paths:             Example paths:         │
+│  /bronze/                  /silver/                   /gold/                 │
+│    └─ stroke/                └─ stroke/                 └─ stroke/           │
+│        ├─ omop/                  ├─ clinical.parquet       ├─ v1.0/          │
+│        ├─ annotations/           ├─ annotations.json       │   ├─ data/      │
+│        └─ dicom/                 └─ imaging_meta.parquet   │   └─ manifest   │
+│                                                            └─ v1.1/          │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Tech Stack Options:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│              LIGHTWEIGHT (On-Prem)    │    ENTERPRISE (Cloud/Hybrid)    │
+├───────────────────────────────────────┼─────────────────────────────────┤
+│ Storage:    MinIO                     │ Storage:    S3/Azure Blob/GCS   │
+│ Format:     Apache Iceberg            │ Format:     Delta Lake          │
+│ Engine:     DuckDB + dbt              │ Engine:     Databricks/Spark    │
+│ Catalog:    Hive Metastore            │ Catalog:    Unity Catalog       │
+│ Orchestrate: Airflow                  │ Orchestrate: Airflow/Dagster    │
+│ Governance: Apache Atlas              │ Governance: Purview/Collibra    │
+└───────────────────────────────────────┴─────────────────────────────────┘
+```
+
+---
+
+### LEVEL 4: Enterprise Production with Full Governance
+
+**Best for:** Multi-institution sharing, regulatory compliance, long-term sustainability
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│               LEVEL 4: ENTERPRISE DATA MESH + GOVERNANCE                            │
+├─────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                     │
+│  ┌───────────────────────────────────────────────────────────────────────────────┐  │
+│  │                         CONTROL PLANE                                         │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐   │  │
+│  │  │   Data      │  │   Access    │  │   Audit     │  │   Data Quality      │   │  │
+│  │  │   Catalog   │  │   Control   │  │   Logger    │  │   Monitor           │   │  │
+│  │  │  (Datahub)  │  │   (OPA)     │  │  (ELK/Loki) │  │   (Great Expect.)   │   │  │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘   │  │
+│  └───────────────────────────────────────────────────────────────────────────────┘  │
+│                                          │                                          │
+│                                          ▼                                          │
+│  ┌───────────────────────────────────────────────────────────────────────────────┐  │
+│  │                         DATA PLANE                                            │  │
+│  │                                                                               │  │
+│  │  ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐        │  │
+│  │  │  Ingestion      │      │  Processing     │      │  Publication    │        │  │
+│  │  │  ─────────      │      │  ──────────     │      │  ───────────    │        │  │
+│  │  │                 │      │                 │      │                 │        │  │
+│  │  │ • CDC (Debezium)│─────▶│ • Spark/dbt     │─────▶│ • API Gateway   │        │  │
+│  │  │ • Batch Extract │      │ • Validation    │      │ • CKAN Sync     │        │  │
+│  │  │ • Event Stream  │      │ • Transformation│      │ • FHIR Server   │        │  │
+│  │  │   (Kafka)       │      │                 │      │                 │        │  │
+│  │  └─────────────────┘      └─────────────────┘      └─────────────────┘        │  │
+│  │           │                        │                        │                 │  │
+│  │           ▼                        ▼                        ▼                 │  │
+│  │  ┌─────────────────────────────────────────────────────────────────────────┐  │  │
+│  │  │                    DATA LAKE (Delta Lake / Iceberg)                     │  │  │
+│  │  │  ┌───────────┐    ┌───────────┐    ┌───────────┐    ┌───────────┐       │  │  │
+│  │  │  │  Landing  │───▶│   Bronze  │───▶│   Silver  │───▶│    Gold   │       │  │  │
+│  │  │  │   Zone    │    │           │    │           │    │           │       │  │  │
+│  │  │  └───────────┘    └───────────┘    └───────────┘    └───────────┘       │  │  │
+│  │  │                                                                         │  │  │
+│  │  │  Storage: S3/MinIO + Delta Lake    Query: Trino/Spark SQL               │  │  │
+│  │  └─────────────────────────────────────────────────────────────────────────┘  │  │
+│  │                                                                               │  │
+│  └───────────────────────────────────────────────────────────────────────────────┘  │
+│                                          │                                          │
+│                                          ▼                                          │
+│  ┌───────────────────────────────────────────────────────────────────────────────┐  │
+│  │                     NETWORK / SECURITY PLANE                                  │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐   │  │
+│  │  │   VPN /     │  │   API       │  │   Secrets   │  │   Certificate       │   │  │
+│  │  │   Private   │  │   Gateway   │  │   Manager   │  │   Manager           │   │  │
+│  │  │   Link      │  │  (Kong/AWS) │  │   (Vault)   │  │   (Let's Encrypt)   │   │  │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────┘   │  │
+│  └───────────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Governance Components Detail:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    MEDICAL DATA GOVERNANCE FRAMEWORK                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  1. DATA CATALOG (DataHub/OpenMetadata)                                     │
+│     ├── Dataset discovery and search                                        │
+│     ├── Schema documentation                                                │
+│     ├── Lineage tracking (source → gold)                                    │
+│     ├── Owner/steward assignment                                            │
+│     └── Data dictionary (OMOP vocabularies)                                 │
+│                                                                             │
+│  2. ACCESS CONTROL (Open Policy Agent)                                      │
+│     ├── Role-based access (RBAC)                                            │
+│     │     • data_engineer: bronze, silver                                   │
+│     │     • data_scientist: silver, gold (read)                             │
+│     │     • consortium_member: gold (approved datasets)                     │
+│     ├── Attribute-based policies                                            │
+│     │     • IF dataset.sensitivity = "high" THEN require_approval           │
+│     └── Data use agreements (DUA) enforcement                               │
+│                                                                             │
+│  3. AUDIT & COMPLIANCE                                                      │
+│     ├── All access logged (who, what, when, why)                            │
+│     ├── Data export tracking                                                │
+│     ├── Retention policy enforcement                                        │
+│     └── Compliance reports (PDPA, IRB)                                      │
+│                                                                             │
+│  4. DATA QUALITY (Great Expectations / Soda)                                │
+│     ├── Automated validation rules                                          │
+│     ├── Quality scorecards per dataset                                      │
+│     ├── Anomaly detection                                                   │
+│     └── PHI leakage detection (re-identification risk)                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Recommendation Matrix
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────┐
+│                         SOLUTION SELECTION GUIDE                                   │
+├─────────────┬──────────────┬───────────────┬────────────────┬──────────────────────┤
+│   Factor    │   Level 1    │   Level 2     │    Level 3     │      Level 4         │
+│             │  File-Based  │  ETL Pipeline │   Data Lake    │  Enterprise Mesh     │
+├─────────────┼──────────────┼───────────────┼────────────────┼──────────────────────┤
+│ Team Size   │   1-2        │    2-4        │     4-8        │      8+              │
+│ Datasets    │   1-3        │    3-10       │     10-50      │      50+             │
+│ Frequency   │  Monthly     │   Weekly      │    Daily       │   Real-time          │
+│ Consumers   │   1          │    1-3        │     3-10       │      10+             │
+│ Budget      │   $0-1K      │   $1K-10K     │   $10K-50K     │     $50K+            │
+│ Setup Time  │   1-2 weeks  │   1-2 months  │   3-6 months   │    6-12 months       │
+│ DevOps Need │   Low        │   Medium      │    High        │     Very High        │
+├─────────────┼──────────────┼───────────────┼────────────────┼──────────────────────┤
+│ RAMA        │  ✓ Start     │  ✓ Grow       │  ✓ Scale       │  ✓ Long-term         │
+│ Recommended │    Here      │    Here       │                │                      │
+└─────────────┴──────────────┴───────────────┴────────────────┴──────────────────────┘
+```
+
+---
+
+## Suggested Roadmap for RAMA
+
+Based on your context (7 datasets, single consortium consumer, hospital environment), I suggest:
+
+```
+PHASE 1 (Month 1-2)           PHASE 2 (Month 3-6)         PHASE 3 (Month 6-12)
+─────────────────────         ─────────────────────       ─────────────────────
+
+┌─────────────────────┐      ┌─────────────────────┐     ┌─────────────────────┐
+│ Level 1 + Basics    │      │ Level 2 Automation  │     │ Level 3 Lake        │
+│                     │      │                     │     │                     │
+│ • Manual exports    │ ───▶ │ • Airflow DAGs      │ ──▶ │ • Medallion layers  │
+│ • CKAN API setup    │      │ • MinIO staging     │     │ • Delta/Iceberg     │
+│ • Basic manifest    │      │ • Quality checks    │     │ • Data catalog      │
+│ • Document process  │      │ • Audit logging     │     │ • Self-service      │
+│                     │      │                     │     │                     │
+│ Goal: Prove it      │      │ Goal: Automate it   │     │ Goal: Scale it      │
+│       works         │      │                     │     │                     │
+└─────────────────────┘      └─────────────────────┘     └─────────────────────┘
+
+Deliverables:                 Deliverables:               Deliverables:
+• 1 dataset on CKAN          • All 7 datasets            • Multi-consumer ready
+• Export documentation       • Automated refresh         • Analytics platform
+• DUA template               • Monitoring dashboard      • Full governance
+```
