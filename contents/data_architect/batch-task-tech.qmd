@@ -1,0 +1,423 @@
+# Batch/Task-Oriented Workflow Technologies
+
+Let me break down each tool's essence, philosophy, and ideal use cases.
+
+---
+
+## 1. Apache Airflow
+
+**The Veteran Orchestrator**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  APACHE AIRFLOW                                                 │
+│  "Programmatically author, schedule, and monitor workflows"     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Core Concept: DAG (Directed Acyclic Graph) of Tasks            │
+│                                                                 │
+│        ┌──────────┐                                             │
+│        │  DAG.py  │  ◀── Python code defines workflow           │
+│        └────┬─────┘                                             │
+│             │                                                   │
+│             ▼                                                   │
+│  ┌──────┐      ┌──────┐      ┌──────┐                           │
+│  │Task A│─────▶│Task B│─────▶│Task C│   ◀── Operators           │
+│  └──────┘      └──────┘      └──────┘       (Python, Bash,      │
+│      │                           │           SQL, HTTP, etc.)   │
+│      │         ┌──────┐          │                              │
+│      └────────▶│Task D│◀─────────┘                              │
+│                └──────┘                                         │
+│                                                                 │
+│  Architecture:                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐         │
+│  │Scheduler │  │ Webserver│  │ Workers  │  │ Metadata │         │
+│  │          │  │   (UI)   │  │(Executors│  │   DB     │         │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘         │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Essence:**
+- Originated at Airbnb (2014), now Apache project
+- "Configuration as code" — DAGs are Python scripts
+- Rich ecosystem of pre-built operators (500+)
+- Battle-tested at massive scale
+
+**Best For:**
+- Complex, enterprise-grade ETL pipelines
+- Teams with existing Airflow expertise
+- Workflows needing diverse integrations (cloud, databases, APIs)
+- Organizations wanting managed options (Astronomer, MWAA, Cloud Composer)
+
+**Pain Points:**
+- DAGs are parsed constantly (performance overhead)
+- Local development can be clunky
+- "DAG bag" model makes dynamic workflows awkward
+- Upgrading can be painful
+
+---
+
+## 2. Prefect
+
+**The Modern, Pythonic Orchestrator**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  PREFECT                                                        │
+│  "The easiest way to orchestrate and observe your data stack"   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Core Concept: Flows & Tasks as decorated Python functions      │
+│                                                                 │
+│     @task                        @flow                          │
+│     def extract(): ...           def etl_pipeline():            │
+│                                      data = extract()           │
+│     @task                            clean = transform(data)    │
+│     def transform(data): ...         load(clean)                │
+│                                                                 │
+│     @task                                                       │
+│     def load(data): ...          # Just Python!                 │
+│                                                                 │
+│                                                                 │
+│  Hybrid Execution Model:                                        │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │                   Prefect Cloud / Server                │    │
+│  │                   (Orchestration Layer)                 │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│           ▲                              ▲                      │
+│           │ heartbeat                    │ heartbeat            │
+│           │                              │                      │
+│  ┌────────┴────────┐          ┌──────────┴────────┐             │
+│  │  Your Machine   │          │  Cloud / K8s      │             │
+│  │  (local agent)  │          │  (remote agent)   │             │
+│  └─────────────────┘          └───────────────────┘             │
+│    Code runs HERE               Code runs HERE                  │
+│    (your infra)                 (your infra)                    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Essence:**
+- "Prefect 2" (Orion) is a major rewrite — very Pythonic
+- Flows are just Python functions with decorators
+- Dynamic workflows are natural (loops, conditionals)
+- Hybrid model: orchestration in cloud, execution on your infra
+
+**Best For:**
+- Python-heavy data teams wanting minimal boilerplate
+- Rapid prototyping → production
+- Teams wanting dynamic/parametrized workflows
+- Mixed execution environments (local + cloud)
+
+**Standout Features:**
+- Native async support
+- Built-in retries, caching, concurrency limits
+- Excellent local development experience
+- Free tier of Prefect Cloud
+
+---
+
+## 3. Dagster
+
+**The Software-Defined Data Platform**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  DAGSTER                                                        │
+│  "Build, test, and observe data pipelines"                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Core Concept: SOFTWARE-DEFINED ASSETS                          │
+│                                                                 │
+│  Traditional (task-centric):      Dagster (asset-centric):      │
+│  "Run task A, then B, then C"     "I want these data assets"    │
+│                                                                 │
+│  ┌──────┐   ┌──────┐   ┌──────┐   ┌─────────────────────────┐   │
+│  │Task A│──▶│Task B│──▶│Task C│   │  @asset                 │   │
+│  └──────┘   └──────┘   └──────┘   │  def patients():        │   │
+│      │          │          │      │      return query(...)  │   │
+│      ▼          ▼          ▼      │                         │   │
+│     ???        ???        ???     │@asset                   │   │
+│                                   │def daily_stats(patients)│   │
+│                                   │      return agg(...)    │   │
+│                                   └─────────────────────────┘   │
+│                                              │                  │
+│                                              ▼                  │
+│                                   ┌─────────────────────────┐   │
+│                                   │  Asset Lineage Graph    │   │
+│                                   │  (auto-generated)       │   │
+│                                   │                         │   │
+│                                   │ patients ──▶ daily_stats│   │
+│                                   │      │                  │   │
+│                                   │      ▼                  │   │
+│                                   │  monthly_report         │   │
+│                                   └─────────────────────────┘   │
+│                                                                 │
+│  Key Abstractions:                                              │
+│  • Assets: Data artifacts (tables, files, ML models)            │
+│  • Ops: Computation units (like tasks)                          │
+│  • Jobs: Collection of ops/assets to execute                    │
+│  • Resources: External systems (DBs, APIs) - dependency inject  │
+│  • IO Managers: How assets are stored/loaded                    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Essence:**
+- Shift from "what tasks to run" → "what data assets to materialize"
+- Strong typing with Python type hints
+- Built-in testing framework
+- Excellent observability and data lineage
+
+**Best For:**
+- Data engineering teams building analytics platforms
+- Organizations caring deeply about data quality & lineage
+- ML pipelines where "assets" (models, features) matter
+- Teams wanting strong software engineering practices
+
+**Standout Features:**
+- Asset-centric mental model
+- Dagster Cloud (managed) or self-hosted
+- Partitioning (time-based, categorical) built-in
+- First-class dbt integration
+
+---
+
+## 4. dbt (Data Build Tool)
+
+**The SQL Transformation Layer**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  dbt (data build tool)                                          │
+│  "Transform data in your warehouse using SQL"                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Core Concept: SQL models that build on each other              │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  Raw Data          Staging           Marts (Analytics)  │    │
+│  │  (sources)         (cleaned)         (business logic)   │    │
+│  │                                                         │    │
+│  │  ┌─────────┐      ┌───────────┐      ┌───────────────┐  │    │
+│  │  │raw_scans│─────▶│stg_scans  │─────▶│fact_radiology │  │    │
+│  │  └─────────┘      └───────────┘      │    _studies   │  │    │
+│  │                                      └───────────────┘  │    │
+│  │  ┌─────────┐      ┌───────────┐             │           │    │
+│  │  │raw_pats │─────▶│stg_patients│────────────┤           │    │
+│  │  └─────────┘      └───────────┘             ▼           │    │
+│  │                                      ┌───────────────┐  │    │
+│  │                                      │dim_patients   │  │    │
+│  │                                      └───────────────┘  │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  Project Structure:                                             │
+│  dbt_project/                                                   │
+│  ├── models/                                                    │
+│  │   ├── staging/                                               │
+│  │   │   └── stg_scans.sql      ◀── SELECT with ref()           │
+│  │   └── marts/                                                 │
+│  │       └── fact_studies.sql                                   │
+│  ├── tests/                      ◀── Data quality tests         │
+│  ├── macros/                     ◀── Reusable SQL (Jinja)       │
+│  └── dbt_project.yml                                            │
+│                                                                 │
+│  NOT an orchestrator — needs Airflow/Prefect/Dagster to run!    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Essence:**
+- SQL-first: analysts can contribute without Python
+- Runs inside your data warehouse (BigQuery, Snowflake, Redshift, etc.)
+- Jinja templating for dynamic SQL
+- Built-in testing and documentation
+
+**Best For:**
+- Analytics engineering (the "T" in ELT)
+- Teams with strong SQL skills
+- Building dimensional models / data marts
+- Data quality testing at the SQL level
+
+**Important Distinction:**
+```
+dbt is NOT an orchestrator!
+
+  ┌──────────┐         ┌──────────┐         ┌──────────┐
+  │ Extract  │         │ Transform│         │  Load    │
+  │ (Fivetran│────────▶│  (dbt)   │────────▶│(BI Tool) │
+  │  Airbyte)│         │          │         │          │
+  └──────────┘         └──────────┘         └──────────┘
+        │                   │                     │
+        └───────────────────┴─────────────────────┘
+                            │
+                   Orchestrated by:
+              Airflow / Prefect / Dagster
+```
+
+---
+
+## 5. AWS Step Functions
+
+**The Serverless State Machine**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  AWS STEP FUNCTIONS                                             │
+│  "Serverless visual workflow orchestration"                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Core Concept: State Machine defined in ASL (JSON/YAML)         │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │                   State Machine                         │    │
+│  │                                                         │    │
+│  │   ┌─────────┐                                           │    │
+│  │   │ Start   │                                           │    │
+│  │   └────┬────┘                                           │    │
+│  │        ▼                                                │    │
+│  │   ┌─────────┐      ┌─────────┐                          │    │
+│  │   │ Lambda  │─────▶│ Choice  │  (if/else branching)     │    │
+│  │   │ Extract │      └────┬────┘                          │    │
+│  │   └─────────┘           │                               │    │
+│  │              ┌──────────┼──────────┐                    │    │
+│  │              ▼          ▼          ▼                    │    │
+│  │         ┌────────┐ ┌────────┐ ┌────────┐                │    │
+│  │         │ Glue   │ │ ECS    │ │ Lambda │                │    │
+│  │         │ Job    │ │ Task   │ │ Notify │                │    │
+│  │         └────────┘ └────────┘ └────────┘                │    │
+│  │              │          │          │                    │    │
+│  │              └──────────┴──────────┘                    │    │
+│  │                         ▼                               │    │
+│  │                    ┌─────────┐                          │    │
+│  │                    │   End   │                          │    │
+│  │                    └─────────┘                          │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  State Types:                                                   │
+│  • Task: Execute work (Lambda, ECS, Glue, SageMaker, etc.)      │
+│  • Choice: Conditional branching                                │
+│  • Parallel: Run states concurrently                            │
+│  • Map: Iterate over array (dynamic parallelism)                │
+│  • Wait: Delay execution                                        │
+│  • Pass/Succeed/Fail: Control flow                              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Essence:**
+- Fully serverless (no infrastructure to manage)
+- Visual designer in AWS Console
+- Deep AWS service integration
+- Pay per state transition
+
+**Best For:**
+- AWS-native architectures
+- Serverless applications (Lambda-heavy)
+- Microservice orchestration
+- Teams preferring low-code / visual design
+
+**Two Flavors:**
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Standard Workflows          vs      Express Workflows          │
+├─────────────────────────────────────────────────────────────────┤
+│  • Long-running (up to 1 year)       • Short (up to 5 min)      │
+│  • Exactly-once execution            • At-least-once            │
+│  • ~$0.025 per 1000 transitions      • ~$1 per 1M requests      │
+│  • Audit/compliance workflows        • High-volume, fast tasks  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Decision Matrix
+
+| Criteria | Airflow | Prefect | Dagster | dbt | Step Functions |
+|----------|---------|---------|---------|-----|----------------|
+| **Primary Use Case** | General orchestration | Python workflows | Data platform | SQL transforms | AWS orchestration |
+| **Language** | Python DAGs | Python (decorators) | Python (assets) | SQL + Jinja | JSON/YAML (ASL) |
+| **Learning Curve** | Medium-High | Low-Medium | Medium | Low | Low-Medium |
+| **Local Development** | ⚠️ Clunky | ✅ Excellent | ✅ Excellent | ✅ Excellent | ⚠️ Needs SAM/CDK |
+| **Dynamic Workflows** | ⚠️ Awkward | ✅ Native | ✅ Native | ❌ N/A | ✅ Map state |
+| **Asset/Lineage Focus** | ❌ Task-centric | ⚠️ Basic | ✅ Core concept | ✅ Built-in | ❌ No |
+| **Data Quality Testing** | ⚠️ Manual | ⚠️ Manual | ✅ Built-in | ✅ Built-in | ❌ No |
+| **Managed Cloud Option** | ✅ Many | ✅ Prefect Cloud | ✅ Dagster Cloud | ✅ dbt Cloud | ✅ Native AWS |
+| **Self-Hosted Complexity** | High | Medium | Medium | Low | N/A (serverless) |
+| **AWS Integration** | ✅ Operators | ✅ Blocks | ✅ Resources | ⚠️ Via adapters | ✅ Native |
+| **GCP Integration** | ✅ Operators | ✅ Blocks | ✅ Resources | ✅ BigQuery | ❌ No |
+| **Cost (Self-Hosted)** | Infra cost | Infra cost | Infra cost | Free (Core) | N/A |
+| **Cost (Managed)** | $$$$ | $$ | $$$ | $$$ | Pay-per-use |
+| **Community/Ecosystem** | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ |
+| **Maturity** | Very High (2014) | Medium (2018/2022) | Medium (2019) | High (2016) | High (2016) |
+
+---
+
+## Scenario-Based Recommendations
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  "I want to..."                          Recommended Tool       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Transform data inside my data warehouse  ──────▶  dbt          │
+│  (SQL-based analytics engineering)                              │
+│                                                                 │
+│  Orchestrate dbt + other tasks            ──────▶  Dagster      │
+│  with data lineage tracking                       (or Prefect)  │
+│                                                                 │
+│  Build complex enterprise ETL at scale    ──────▶  Airflow      │
+│  with 100+ operators/integrations                               │
+│                                                                 │
+│  Rapid Python pipeline development        ──────▶  Prefect      │
+│  with minimal boilerplate                                       │
+│                                                                 │
+│  Orchestrate AWS Lambda + services        ──────▶  Step Func.   │
+│  in serverless architecture                                     │
+│                                                                 │
+│  Build ML training pipelines with         ──────▶  Dagster      │
+│  model versioning as assets                       (or Prefect)  │
+│                                                                 │
+│  Simple cron-like scheduling,             ──────▶  Prefect      │
+│  quick to start                                   (or cron!)    │
+│                                                                 │
+│  Medical imaging batch processing         ──────▶  Prefect      │
+│  (DICOM → AI → Results)                           or Dagster    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## For Your Context (Radiology AI Unit)
+
+Given your background, here's my take:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  RECOMMENDED STACK                                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Orchestration:  Prefect or Dagster                             │
+│                  ├── Prefect: Faster to learn, very Pythonic    │
+│                  └── Dagster: Better if data lineage/assets     │
+│                               matter (ML models, features)      │
+│                                                                 │
+│  SQL Transforms: dbt (if using a data warehouse like BigQuery)  │
+│                                                                 │
+│  Why NOT Airflow: Overkill for starting out, harder to maintain │
+│                                                                 │
+│  Why NOT Step Functions: Only if heavily AWS + serverless       │
+│                                                                 │
+│  Example Pipeline:                                              │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  Prefect/Dagster                                        │    │
+│  │  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────┐  │    │
+│  │  │ Query    │──▶│ DICOM    │──▶│ Run AI   │──▶│ Store│  │    │
+│  │  │ PACS     │   │ Process  │   │ Model    │   │ to DB│  │    │
+│  │  └──────────┘   └──────────┘   └──────────┘   └──────┘  │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
