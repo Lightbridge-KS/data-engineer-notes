@@ -1,0 +1,786 @@
+---
+title: "Prefect Crash Course: Local Self-Hosted Data Pipeline Automation"
+---
+
+## What is Prefect?
+
+Prefect is a modern Python-based workflow orchestration framework for building, scheduling, and monitoring data pipelines.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     WHY PREFECT?                                    │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│   Traditional Scripts              Prefect Orchestration            │
+│   ───────────────────              ─────────────────────            │
+│                                                                     │
+│   ┌─────────┐                      ┌─────────┐                      │
+│   │ script1 │──?──> fails          │  Flow   │──retry──> succeeds   │
+│   └─────────┘       silently       └─────────┘    │                 │
+│        │                                ↓         ↓                 │
+│   No visibility                   ┌─────────────────┐               │
+│   No retry                        │   Dashboard     │               │
+│   No scheduling                   │   • Logs        │               │
+│   Manual recovery                 │   • Metrics     │               │
+│                                   │   • Alerts      │               │
+│                                   └─────────────────┘               │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Core Concepts
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    PREFECT ARCHITECTURE                             │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │                         FLOW                                 │   │
+│  │  (Container for your workflow - like a "main" function)      │   │
+│  │                                                              │   │
+│  │   ┌────────┐      ┌────────┐      ┌────────┐                 │   │
+│  │   │ Task 1 │ ───> │ Task 2 │ ───> │ Task 3 │                 │   │
+│  │   │Extract │      │Transform│     │  Load  │                 │   │
+│  │   └────────┘      └────────┘      └────────┘                 │   │
+│  │       │               │               │                      │   │
+│  │       └───────────────┴───────────────┘                      │   │
+│  │                       │                                      │   │
+│  │              Automatic: logging, retries,                    │   │
+│  │              caching, state tracking                         │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                          │                                          │
+│                          ↓                                          │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │                    DEPLOYMENT                                │   │
+│  │     (Packaging a flow for scheduling & remote execution)     │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                          │                                          │
+│                          ↓                                          │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐         │
+│  │  Prefect Server│  │   Work Pool    │  │    Worker      │         │
+│  │  (Orchestrator)│  │ (Job Queue)    │  │ (Job Executor) │         │
+│  └────────────────┘  └────────────────┘  └────────────────┘         │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+| Concept | Description |
+|---------|-------------|
+| **Task** | A single unit of work (decorated function) |
+| **Flow** | Container that orchestrates tasks |
+| **Deployment** | Packaged flow ready for scheduling |
+| **Work Pool** | Queue that holds scheduled flow runs |
+| **Worker** | Process that picks up and executes flows |
+
+---
+
+## 1. Installation & Setup
+
+```bash
+# Create a virtual environment (recommended)
+python -m venv prefect-env
+source prefect-env/bin/activate  # On macOS/Linux
+
+# Install Prefect
+pip install prefect
+
+# Verify installation
+prefect version
+```
+
+---
+
+## 2. Your First Flow & Task
+
+Create a file `my_first_flow.py`:
+
+```python
+from prefect import flow, task
+import httpx
+
+# ─────────────────────────────────────────────────────────
+# TASKS: Individual units of work
+# ─────────────────────────────────────────────────────────
+
+@task(log_prints=True, retries=2, retry_delay_seconds=5)
+def fetch_data(url: str) -> dict:
+    """Fetch data from an API."""
+    print(f"Fetching data from {url}")
+    response = httpx.get(url)
+    response.raise_for_status()
+    return response.json()
+
+
+@task(log_prints=True)
+def transform_data(data: dict) -> dict:
+    """Transform the raw data."""
+    print(f"Transforming {len(data)} records...")
+    # Example transformation
+    return {
+        "count": len(data),
+        "sample": data[:3] if isinstance(data, list) else data
+    }
+
+
+@task(log_prints=True)
+def save_data(data: dict, filename: str) -> str:
+    """Save data to a file."""
+    import json
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=2)
+    print(f"Saved to {filename}")
+    return filename
+
+
+# ─────────────────────────────────────────────────────────
+# FLOW: Orchestrates tasks
+# ─────────────────────────────────────────────────────────
+
+@flow(name="My ETL Pipeline", log_prints=True)
+def etl_pipeline(url: str, output_file: str = "output.json"):
+    """Main ETL flow."""
+    # Tasks are called like regular functions
+    raw_data = fetch_data(url)
+    transformed = transform_data(raw_data)
+    result = save_data(transformed, output_file)
+    
+    print(f"Pipeline completed! Output: {result}")
+    return result
+
+
+# ─────────────────────────────────────────────────────────
+# RUN
+# ─────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    # Run the flow directly
+    etl_pipeline(
+        url="https://jsonplaceholder.typicode.com/posts",
+        output_file="posts.json"
+    )
+```
+
+Run it:
+
+```bash
+python my_first_flow.py
+```
+
+---
+
+## 3. Self-Hosted Prefect Server (Local)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│               SELF-HOSTED ARCHITECTURE                              │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│   Your Machine (localhost)                                          │
+│   ─────────────────────────                                         │
+│                                                                     │
+│   ┌─────────────────┐     ┌─────────────────┐                       │
+│   │  Prefect Server │◄───►│   PostgreSQL    │  (optional, default   │
+│   │  localhost:4200 │     │   or SQLite     │   uses SQLite)        │
+│   └────────┬────────┘     └─────────────────┘                       │
+│            │                                                        │
+│            │  API                                                   │
+│            ↓                                                        │
+│   ┌─────────────────┐     ┌─────────────────┐                       │
+│   │    Work Pool    │◄───►│     Worker      │  (polls for jobs)     │
+│   │   "local-pool"  │     │                 │                       │
+│   └─────────────────┘     └────────┬────────┘                       │
+│                                    │                                │
+│                                    ↓                                │
+│                           ┌─────────────────┐                       │
+│                           │  Flow Execution │                       │
+│                           │   (your code)   │                       │
+│                           └─────────────────┘                       │
+│                                                                     │
+│   Browser: http://localhost:4200  →  Dashboard UI                   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Step-by-Step Setup
+
+**Terminal 1: Start the Prefect Server**
+
+```bash
+# Start local server (uses SQLite by default)
+prefect server start
+```
+
+You'll see:
+
+```
+ ___ ___ ___ ___ ___ ___ _____ 
+| _ \ _ \ __| __| __/ __|_   _|
+|  _/   / _|| _|| _| (__  | |  
+|_| |_|_\___|_| |___\___| |_|  
+
+Configure Prefect to communicate with the server with:
+
+    prefect config set PREFECT_API_URL=http://127.0.0.1:4200/api
+
+View the API reference documentation at http://127.0.0.1:4200/docs
+```
+
+**Terminal 2: Configure CLI to use local server**
+
+```bash
+# Point Prefect CLI to your local server
+prefect config set PREFECT_API_URL=http://127.0.0.1:4200/api
+
+# Verify
+prefect config view
+```
+
+---
+
+## 4. Deployments (Scheduled Pipelines)
+
+Deployments let you schedule and trigger flows remotely.
+
+### Method 1: Using `flow.serve()` (Simplest)
+
+```python
+# serve_flow.py
+from prefect import flow, task
+from datetime import timedelta
+
+@task(log_prints=True)
+def process_data(batch_id: int):
+    print(f"Processing batch {batch_id}")
+    return f"Batch {batch_id} complete"
+
+
+@flow(log_prints=True)
+def batch_pipeline(batch_id: int = 1):
+    result = process_data(batch_id)
+    return result
+
+
+if __name__ == "__main__":
+    # Serve the flow (creates deployment + starts worker)
+    batch_pipeline.serve(
+        name="batch-deployment",
+        cron="*/5 * * * *",  # Every 5 minutes
+        tags=["production", "etl"],
+        parameters={"batch_id": 100}
+    )
+```
+
+```bash
+python serve_flow.py
+# This will:
+# 1. Create deployment
+# 2. Start a worker
+# 3. Run on schedule
+```
+
+### Method 2: Using Work Pools (Production Setup)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    WORK POOL SETUP                                  │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│   Step 1: Create Work Pool                                          │
+│   ────────────────────────                                          │
+│   $ prefect work-pool create local-pool --type process              │
+│                                                                     │
+│   Step 2: Create Deployment                                         │
+│   ─────────────────────────                                         │
+│   (in your Python file)                                             │
+│                                                                     │
+│   Step 3: Start Worker                                              │
+│   ────────────────────                                              │
+│   $ prefect worker start --pool local-pool                          │
+│                                                                     │
+│   Step 4: Run/Schedule                                              │
+│   ────────────────────                                              │
+│   $ prefect deployment run 'flow-name/deployment-name'              │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Create Work Pool:**
+
+```bash
+# Create a process-based work pool (runs flows as subprocesses)
+prefect work-pool create local-pool --type process
+
+# List work pools
+prefect work-pool ls
+```
+
+**Create Deployment with `flow.deploy()`:**
+
+```python
+# deploy_flow.py
+from prefect import flow, task
+
+@task(log_prints=True, retries=3)
+def extract():
+    print("Extracting data...")
+    return {"records": 100}
+
+@task(log_prints=True)
+def transform(data: dict):
+    print(f"Transforming {data['records']} records")
+    return {"processed": data["records"]}
+
+@task(log_prints=True)
+def load(data: dict):
+    print(f"Loading {data['processed']} records")
+    return "Success"
+
+
+@flow(name="ETL Pipeline", log_prints=True)
+def etl_flow():
+    data = extract()
+    transformed = transform(data)
+    result = load(transformed)
+    return result
+
+
+if __name__ == "__main__":
+    etl_flow.deploy(
+        name="scheduled-etl",
+        work_pool_name="local-pool",
+        cron="0 * * * *",  # Every hour
+        tags=["etl", "production"]
+    )
+```
+
+```bash
+# Create the deployment
+python deploy_flow.py
+
+# Start the worker (in another terminal)
+prefect worker start --pool local-pool
+
+# Manually trigger a run
+prefect deployment run 'ETL Pipeline/scheduled-etl'
+```
+
+---
+
+## 5. Scheduling Options
+
+```python
+from prefect.deployments import Deployment
+
+# ─────────────────────────────────────────────────────────
+# CRON EXPRESSIONS
+# ─────────────────────────────────────────────────────────
+# ┌───────────── minute (0 - 59)
+# │ ┌─────────── hour (0 - 23)
+# │ │ ┌───────── day of month (1 - 31)
+# │ │ │ ┌─────── month (1 - 12)
+# │ │ │ │ ┌───── day of week (0 - 6) (Sunday = 0)
+# │ │ │ │ │
+# * * * * *
+
+cron="0 6 * * *"      # Daily at 6:00 AM
+cron="0 */2 * * *"    # Every 2 hours
+cron="*/30 * * * *"   # Every 30 minutes
+cron="0 9 * * 1"      # Every Monday at 9:00 AM
+cron="0 0 1 * *"      # First day of every month
+
+# ─────────────────────────────────────────────────────────
+# INTERVAL SCHEDULING
+# ─────────────────────────────────────────────────────────
+from datetime import timedelta
+
+my_flow.serve(
+    name="interval-deploy",
+    interval=timedelta(hours=1)  # Every hour
+)
+
+# ─────────────────────────────────────────────────────────
+# RRULE (Complex Schedules)
+# ─────────────────────────────────────────────────────────
+rrule="FREQ=WEEKLY;BYDAY=MO,WE,FR;BYHOUR=9"  # Mon, Wed, Fri at 9 AM
+```
+
+---
+
+## 6. Error Handling & Retries
+
+```python
+from prefect import flow, task
+from prefect.tasks import exponential_backoff
+import random
+
+@task(
+    retries=3,                              # Retry up to 3 times
+    retry_delay_seconds=10,                 # Wait 10s between retries
+    # OR use exponential backoff:
+    # retry_delay_seconds=exponential_backoff(backoff_factor=10),
+    retry_jitter_factor=0.5,                # Add randomness to delay
+    log_prints=True
+)
+def unreliable_task():
+    """Simulates a task that might fail."""
+    if random.random() < 0.7:
+        raise Exception("Random failure!")
+    return "Success!"
+
+
+@flow(log_prints=True)
+def resilient_flow():
+    try:
+        result = unreliable_task()
+        print(f"Task succeeded: {result}")
+    except Exception as e:
+        print(f"Task failed after all retries: {e}")
+        # Handle failure (notify, fallback, etc.)
+        raise
+
+
+if __name__ == "__main__":
+    resilient_flow()
+```
+
+---
+
+## 7. Task Dependencies & Parallel Execution
+
+```python
+from prefect import flow, task
+import time
+
+@task(log_prints=True)
+def task_a():
+    time.sleep(2)
+    print("Task A done")
+    return "A"
+
+@task(log_prints=True)
+def task_b():
+    time.sleep(2)
+    print("Task B done")
+    return "B"
+
+@task(log_prints=True)
+def task_c(a_result, b_result):
+    print(f"Task C received: {a_result}, {b_result}")
+    return "C"
+
+
+@flow(log_prints=True)
+def parallel_flow():
+    """
+    Execution Graph:
+    
+        ┌─────────┐     ┌─────────┐
+        │ Task A  │     │ Task B  │   ← Run in parallel
+        └────┬────┘     └────┬────┘
+             │               │
+             └───────┬───────┘
+                     ↓
+              ┌─────────────┐
+              │   Task C    │           ← Waits for A & B
+              └─────────────┘
+    """
+    # These run in parallel (no dependency between them)
+    future_a = task_a.submit()
+    future_b = task_b.submit()
+    
+    # This waits for both A and B
+    result = task_c(future_a.result(), future_b.result())
+    return result
+
+
+if __name__ == "__main__":
+    parallel_flow()
+```
+
+---
+
+## 8. Caching (Avoid Re-computation)
+
+```python
+from prefect import flow, task
+from prefect.cache_policies import INPUTS
+from datetime import timedelta
+
+@task(
+    cache_policy=INPUTS,                    # Cache based on input args
+    cache_expiration=timedelta(hours=1),    # Cache expires after 1 hour
+    log_prints=True
+)
+def expensive_computation(x: int):
+    """This will be cached based on input 'x'."""
+    print(f"Computing for x={x}...")
+    import time
+    time.sleep(3)  # Simulate expensive work
+    return x ** 2
+
+
+@flow(log_prints=True)
+def caching_flow():
+    # First call: computes and caches
+    result1 = expensive_computation(10)
+    
+    # Second call with same input: returns cached result instantly
+    result2 = expensive_computation(10)
+    
+    # Different input: computes
+    result3 = expensive_computation(20)
+    
+    print(f"Results: {result1}, {result2}, {result3}")
+
+
+if __name__ == "__main__":
+    caching_flow()
+```
+
+---
+
+## 9. Real-World Example: Medical Data Pipeline
+
+Here's a more realistic example for your radiology context:
+
+```python
+# radiology_pipeline.py
+from prefect import flow, task
+from prefect.artifacts import create_markdown_artifact
+from pathlib import Path
+import json
+from datetime import datetime
+
+@task(log_prints=True, retries=2)
+def scan_dicom_directory(source_dir: str) -> list[str]:
+    """Scan directory for new DICOM files."""
+    print(f"Scanning {source_dir} for DICOM files...")
+    
+    # Simulate finding files
+    dicom_files = list(Path(source_dir).glob("**/*.dcm"))
+    print(f"Found {len(dicom_files)} DICOM files")
+    
+    return [str(f) for f in dicom_files]
+
+
+@task(log_prints=True)
+def extract_metadata(dicom_paths: list[str]) -> list[dict]:
+    """Extract metadata from DICOM files."""
+    # In real scenario, use pydicom
+    metadata_list = []
+    for path in dicom_paths:
+        metadata = {
+            "file": path,
+            "patient_id": f"PT{hash(path) % 10000:04d}",
+            "modality": "CT",
+            "study_date": datetime.now().isoformat(),
+        }
+        metadata_list.append(metadata)
+    
+    print(f"Extracted metadata from {len(metadata_list)} files")
+    return metadata_list
+
+
+@task(log_prints=True)
+def validate_data(metadata_list: list[dict]) -> dict:
+    """Validate extracted metadata."""
+    valid = []
+    invalid = []
+    
+    for item in metadata_list:
+        if item.get("patient_id") and item.get("modality"):
+            valid.append(item)
+        else:
+            invalid.append(item)
+    
+    result = {
+        "valid": valid,
+        "invalid": invalid,
+        "valid_count": len(valid),
+        "invalid_count": len(invalid)
+    }
+    
+    print(f"Validation: {len(valid)} valid, {len(invalid)} invalid")
+    return result
+
+
+@task(log_prints=True)
+def save_to_database(validated_data: dict, output_path: str) -> str:
+    """Save validated data (simulated as JSON file)."""
+    with open(output_path, "w") as f:
+        json.dump(validated_data["valid"], f, indent=2)
+    
+    print(f"Saved {validated_data['valid_count']} records to {output_path}")
+    return output_path
+
+
+@task(log_prints=True)
+def create_report(validated_data: dict) -> None:
+    """Create a summary report as Prefect Artifact."""
+    report = f"""
+# DICOM Processing Report
+
+**Timestamp:** {datetime.now().isoformat()}
+
+## Summary
+| Metric | Count |
+|--------|-------|
+| Valid Records | {validated_data['valid_count']} |
+| Invalid Records | {validated_data['invalid_count']} |
+
+## Status
+{'✅ All records processed successfully' if validated_data['invalid_count'] == 0 else '⚠️ Some records failed validation'}
+"""
+    
+    create_markdown_artifact(
+        key="dicom-processing-report",
+        markdown=report,
+        description="Summary of DICOM processing run"
+    )
+    print("Report artifact created")
+
+
+@flow(name="DICOM Processing Pipeline", log_prints=True)
+def dicom_pipeline(
+    source_dir: str = "./dicom_inbox",
+    output_path: str = "./processed_metadata.json"
+):
+    """
+    Main DICOM processing pipeline.
+    
+    Flow Diagram:
+    
+    ┌──────────────────┐
+    │  Scan Directory  │
+    └────────┬─────────┘
+             │
+             ↓
+    ┌──────────────────┐
+    │ Extract Metadata │
+    └────────┬─────────┘
+             │
+             ↓
+    ┌──────────────────┐
+    │  Validate Data   │
+    └────────┬─────────┘
+             │
+       ┌─────┴─────┐
+       ↓           ↓
+    ┌──────┐  ┌──────────┐
+    │ Save │  │  Report  │
+    └──────┘  └──────────┘
+    """
+    # Extract
+    dicom_files = scan_dicom_directory(source_dir)
+    
+    if not dicom_files:
+        print("No DICOM files found. Exiting.")
+        return None
+    
+    # Transform
+    metadata = extract_metadata(dicom_files)
+    validated = validate_data(metadata)
+    
+    # Load & Report (parallel)
+    output = save_to_database(validated, output_path)
+    create_report(validated)
+    
+    return output
+
+
+if __name__ == "__main__":
+    # Run directly for testing
+    # dicom_pipeline(source_dir="./test_dicoms")
+    
+    # Or serve with schedule
+    dicom_pipeline.serve(
+        name="dicom-processor",
+        cron="0 */4 * * *",  # Every 4 hours
+        tags=["radiology", "etl"]
+    )
+```
+
+---
+
+## 10. Useful CLI Commands
+
+```bash
+# ─────────────────────────────────────────────────────────
+# SERVER
+# ─────────────────────────────────────────────────────────
+prefect server start                    # Start local server
+
+# ─────────────────────────────────────────────────────────
+# DEPLOYMENTS
+# ─────────────────────────────────────────────────────────
+prefect deployment ls                   # List all deployments
+prefect deployment run 'flow/deploy'    # Trigger a run
+prefect deployment delete 'flow/deploy' # Delete deployment
+
+# ─────────────────────────────────────────────────────────
+# WORK POOLS & WORKERS
+# ─────────────────────────────────────────────────────────
+prefect work-pool create my-pool --type process
+prefect work-pool ls
+prefect work-pool delete my-pool
+prefect worker start --pool my-pool
+
+# ─────────────────────────────────────────────────────────
+# FLOW RUNS
+# ─────────────────────────────────────────────────────────
+prefect flow-run ls                     # List recent runs
+prefect flow-run cancel <run-id>        # Cancel a run
+
+# ─────────────────────────────────────────────────────────
+# CONFIG
+# ─────────────────────────────────────────────────────────
+prefect config view                     # View current config
+prefect config set PREFECT_API_URL=...  # Set API URL
+```
+
+---
+
+## Quick Reference Summary
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    PREFECT QUICK REFERENCE                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  DECORATORS                                                         │
+│  ──────────                                                         │
+│  @task(retries=3, cache_policy=INPUTS)                              │
+│  @flow(name="My Flow", log_prints=True)                             │
+│                                                                     │
+│  RUNNING FLOWS                                                      │
+│  ─────────────                                                      │
+│  my_flow()                          # Direct execution              │
+│  my_flow.serve(cron="...")          # Serve + schedule              │
+│  my_flow.deploy(work_pool_name=...) # Production deployment         │
+│                                                                     │
+│  TASK EXECUTION                                                     │
+│  ──────────────                                                     │
+│  result = my_task(arg)              # Synchronous                   │
+│  future = my_task.submit(arg)       # Async (parallel)              │
+│  future.result()                    # Get result from future        │
+│                                                                     │
+│  SELF-HOSTED SETUP (3 terminals)                                    │
+│  ───────────────────────────────                                    │
+│  T1: prefect server start                                           │
+│  T2: prefect worker start --pool local-pool                         │
+│  T3: python my_deploy.py                                            │
+│                                                                     │
+│  DASHBOARD: http://localhost:4200                                   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Next Steps
+
+1. **Start simple**: Run the first example to see logs and states
+2. **Launch the server**: `prefect server start` and explore the UI
+3. **Create a deployment**: Use `.serve()` for quick testing
+4. **Add retries and caching**: Make your pipelines resilient
+5. **Scale up**: Use work pools for production workloads

@@ -28,6 +28,8 @@ book:
       chapters: 
         - text: Apache Airflow
           href: "contents/workflows/apache-airflow.qmd"
+        - text: Prefect
+          href: "contents/workflows/prefect.qmd"
     - part: Usecases
       chapters: 
         - text: Exchange Zone Brainstorm
