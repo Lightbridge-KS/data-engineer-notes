@@ -1,0 +1,199 @@
+---
+title: "Event-Driven vs Batch/Task-Oriented Architecture"
+---
+
+These two paradigms represent fundamentally different approaches to how data flows through a system. Let me break them down.
+
+---
+
+## Conceptual Overview
+
+```
+EVENT-DRIVEN ARCHITECTURE
+==========================
+                                         
+  Producer(s)          Broker/Bus           Consumer(s)
+  ┌─────────┐         ┌─────────┐         ┌─────────┐
+  │ Service │─event──▶│  Queue  │─event──▶│ Service │
+  │    A    │         │  Topic  │         │    X    │
+  └─────────┘         │         │         └─────────┘
+  ┌─────────┐         │         │         ┌─────────┐
+  │ Service │─event──▶│         │─event──▶│ Service │
+  │    B    │         └─────────┘         │    Y    │
+  └─────────┘                             └─────────┘
+       │                                       │
+       └── Fire & Forget ──────────────────────┘
+           (Asynchronous, Real-time)
+
+
+BATCH/TASK-ORIENTED WORKFLOW
+============================
+
+  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+  │  Extract │───▶│Transform │───▶│   Load   │───▶│  Report  │
+  │  (E)     │    │  (T)     │    │   (L)    │    │          │
+  └──────────┘    └──────────┘    └──────────┘    └──────────┘
+       │               │               │               │
+       └───────────────┴───────────────┴───────────────┘
+                  Scheduled / Triggered
+                  (e.g., daily at 2 AM)
+```
+
+---
+
+## Side-by-Side Comparison
+
+| Aspect | Event-Driven | Batch/Task-Oriented |
+|--------|--------------|---------------------|
+| **Trigger** | Events (something happens) | Schedule or manual trigger |
+| **Latency** | Near real-time (ms to sec) | High (minutes to hours) |
+| **Data Volume per Operation** | Small (single record/event) | Large (bulk datasets) |
+| **Coupling** | Loose (producers don't know consumers) | Tighter (pipeline dependencies) |
+| **State Management** | Stateless or event-sourced | Often stateful between steps |
+| **Failure Handling** | Retry per event, dead-letter queues | Retry entire job or checkpoint |
+| **Complexity** | Higher (async debugging) | Lower (sequential logic) |
+
+---
+
+## When to Use Each
+
+### Event-Driven Architecture — Best For:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  USE EVENT-DRIVEN WHEN:                                     │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. Real-time responses required                            │
+│     • New DICOM image arrives → trigger AI inference        │
+│     • User action → immediate notification                  │
+│                                                             │
+│  2. Decoupled microservices                                 │
+│     • Service A shouldn't wait for Service B                │
+│     • Teams deploy independently                            │
+│                                                             │
+│  3. Unpredictable, bursty workloads                         │
+│     • ER imaging at night vs daytime                        │
+│     • Scaling consumers up/down dynamically                 │
+│                                                             │
+│  4. Event sourcing / audit trails                           │
+│     • Every state change is an immutable event              │
+│     • Replay events to rebuild state                        │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Radiology Example:**
+```
+New CT uploaded ──▶ [Event Bus] ──┬──▶ AI Triage Service
+                                  ├──▶ PACS Notification
+                                  └──▶ Worklist Update
+```
+
+### Batch/Task-Oriented — Best For:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  USE BATCH WHEN:                                            │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. Large-scale data processing                             │
+│     • Aggregate all studies from past month                 │
+│     • Train/retrain ML models on historical data            │
+│                                                             │
+│  2. Complex transformations with dependencies               │
+│     • ETL pipelines: Extract → Transform → Load             │
+│     • Step B needs ALL of Step A's output                   │
+│                                                             │
+│  3. Cost optimization                                       │
+│     • Run during off-peak hours                             │
+│     • Bulk operations are cheaper than per-event            │
+│                                                             │
+│  4. Reporting & analytics                                   │
+│     • Daily department statistics                           │
+│     • Monthly quality metrics dashboard                     │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Radiology Example:**
+```
+Daily 2 AM Job:
+┌────────────┐   ┌────────────┐   ┌────────────┐   ┌────────────┐
+│ Query PACS │──▶│De-identify │──▶│ Run QC     │──▶│ Update     │
+│ for day's  │   │ & Export   │   │ checks     │   │ Research   │
+│ studies    │   │            │   │            │   │ Database   │
+└────────────┘   └────────────┘   └────────────┘   └────────────┘
+```
+
+---
+
+## Hybrid Architecture (Common in Practice)
+
+Most real-world systems combine both:
+
+```
+                    Real-time Path (Event-Driven)
+                    ─────────────────────────────
+DICOM          ┌─────────┐      ┌─────────────┐
+Arrives ──────▶│  Kafka  │─────▶│ AI Inference│───▶ Alert
+               │  Topic  │      │ Service     │
+               └─────────┘      └─────────────┘
+                    │
+                    │ events persisted
+                    ▼
+               ┌─────────┐
+               │  Data   │◀──── Raw storage
+               │  Lake   │
+               └─────────┘
+                    │
+                    │  Batch Path (Scheduled)
+                    ─────────────────────────
+                    ▼
+            ┌──────────────┐    ┌──────────────┐
+  Nightly:  │ Aggregate &  │───▶│ Train Model  │
+            │ Feature Eng  │    │ Pipeline     │
+            └──────────────┘    └──────────────┘
+```
+
+---
+
+## Technology Examples
+
+| Architecture | Common Tools |
+|--------------|--------------|
+| **Event-Driven** | Apache Kafka, RabbitMQ, AWS SQS/SNS, Google Pub/Sub, Redis Streams |
+| **Batch/Task** | Apache Airflow, Prefect, Dagster, dbt, AWS Step Functions, cron jobs |
+| **Hybrid** | Combine above (e.g., Kafka + Airflow) |
+
+---
+
+## Quick Decision Guide
+
+```
+                         ┌─────────────────────┐
+                         │ Do you need results │
+                         │ in < 1 minute?      │
+                         └─────────┬───────────┘
+                                   │
+                    ┌──────────────┴──────────────┐
+                    ▼                             ▼
+                  YES                            NO
+                    │                             │
+                    ▼                             ▼
+         ┌──────────────────┐         ┌──────────────────┐
+         │ Is data arriving │         │ Is total data    │
+         │ continuously?    │         │ volume large?    │
+         └────────┬─────────┘         └────────┬─────────┘
+                  │                            │
+           ┌──────┴──────┐              ┌──────┴──────┐
+           ▼             ▼              ▼             ▼
+          YES           NO            YES            NO
+           │             │              │             │
+           ▼             ▼              ▼             ▼
+      ┌─────────┐  ┌──────────┐   ┌─────────┐  ┌──────────┐
+      │ EVENT-  │  │ Request/ │   │ BATCH   │  │ Simple   │
+      │ DRIVEN  │  │ Response │   │ WORKFLOW│  │ Script   │
+      └─────────┘  │ (API)    │   └─────────┘  └──────────┘
+                   └──────────┘
+```

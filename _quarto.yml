@@ -9,6 +9,10 @@ book:
   date: today
   chapters:
     - index.qmd
+    - part: System Architecture
+      chapters: 
+        - text: Event-driven vs Task/Batch processing
+          href: "contents/data_architect/event-driven-vs-task-based.qmd"
     - part: Data Solution
       chapters: 
         - text: OLAP for Radiology
