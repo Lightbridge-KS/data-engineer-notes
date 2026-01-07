@@ -18,6 +18,10 @@ book:
     - part: MinIO
       chapters: 
         - "contents/minio/minio-cheatsheet.qmd"
+    - part: Workflow
+      chapters: 
+        - text: Apache Airflow
+          href: "contents/workflows/apache-airflow.qmd"
     - part: Usecases
       chapters: 
         - text: Exchange Zone Brainstorm

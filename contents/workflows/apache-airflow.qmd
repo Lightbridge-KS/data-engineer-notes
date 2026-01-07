@@ -1,0 +1,546 @@
+---
+title: "Crash Course: Apache Airflow DAGs"
+---
+
+## What is Airflow?
+
+Apache Airflow is an open-source platform to **programmatically author, schedule, and monitor workflows**. Think of it as a sophisticated "cron on steroids" that can orchestrate complex data pipelines.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     AIRFLOW ARCHITECTURE                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌──────────┐    ┌──────────┐    ┌──────────┐                  │
+│   │ Scheduler│───▶│ Executor │───▶│ Workers  │                  │
+│   └──────────┘    └──────────┘    └──────────┘                  │
+│        │                               │                        │
+│        ▼                               ▼                        │
+│   ┌──────────┐                  ┌──────────┐                    │
+│   │ Metadata │◀─────────────────│  Tasks   │                    │
+│   │    DB    │                  │ Running  │                    │
+│   └──────────┘                  └──────────┘                    │
+│        │                                                        │
+│        ▼                                                        │
+│   ┌──────────┐                                                  │
+│   │ Web UI   │  ◀── You monitor DAGs here                       │
+│   └──────────┘                                                  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## What is a DAG?
+
+**DAG = Directed Acyclic Graph**
+
+```
+Directed: Tasks have a specific direction (A → B means A runs before B)
+Acyclic:  No circular dependencies (A → B → C → A is NOT allowed)
+Graph:    Collection of nodes (tasks) connected by edges (dependencies)
+```
+
+### Visual Example
+
+```
+         ┌─────────────┐
+         │  Extract    │
+         │   Data      │
+         └──────┬──────┘
+                │
+        ┌───────┴───────┐
+        ▼               ▼
+┌─────────────┐  ┌─────────────┐
+│ Transform   │  │  Validate   │
+│   Data      │  │    Data     │
+└──────┬──────┘  └──────┬──────┘
+       │                │
+       └───────┬────────┘
+               ▼
+        ┌─────────────┐
+        │    Load     │
+        │   to DB     │
+        └─────────────┘
+```
+
+---
+
+## Core Concepts
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  CONCEPT        │  DESCRIPTION                                 │
+├────────────────────────────────────────────────────────────────┤
+│  DAG            │  Container for tasks, defines schedule       │
+│  Task           │  Single unit of work (Python, SQL, etc.)     │
+│  Operator       │  Template for a task (Python, Bash, etc.)    │
+│  Dependencies   │  Order of task execution (>> or <<)          │
+│  Schedule       │  When/how often DAG runs (cron expression)   │
+│  XCom           │  Cross-communication between tasks           │
+└────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Installation (on your Mac)
+
+```bash
+# Create a virtual environment
+python -m venv airflow-env
+source airflow-env/bin/activate
+
+# Install Airflow (standalone for learning)
+pip install apache-airflow
+
+# Initialize the database and create admin user
+airflow standalone
+```
+
+This starts Airflow at `http://localhost:8080` (username: admin, password shown in terminal).
+
+---
+
+## Your First DAG
+
+Create this file at `~/airflow/dags/my_first_dag.py`:
+
+```python
+from datetime import datetime, timedelta
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from airflow.operators.bash import BashOperator
+
+# ============================================================
+# 1. Define default arguments (applied to all tasks)
+# ============================================================
+default_args = {
+    'owner': 'lightbridge',
+    'depends_on_past': False,
+    'email_on_failure': False,
+    'retries': 1,
+    'retry_delay': timedelta(minutes=5),
+}
+
+# ============================================================
+# 2. Define the DAG
+# ============================================================
+with DAG(
+    dag_id='my_first_dag',
+    default_args=default_args,
+    description='A simple tutorial DAG',
+    schedule='@daily',              # Run once a day
+    start_date=datetime(2025, 1, 1),
+    catchup=False,                  # Don't backfill past dates
+    tags=['tutorial'],
+) as dag:
+
+    # ========================================================
+    # 3. Define Tasks
+    # ========================================================
+    
+    # Task 1: Bash command
+    task_extract = BashOperator(
+        task_id='extract_data',
+        bash_command='echo "Extracting data..." && sleep 2',
+    )
+
+    # Task 2: Python function
+    def transform_data():
+        print("Transforming data...")
+        data = {'patient_count': 100, 'study_count': 250}
+        return data  # This gets pushed to XCom automatically
+
+    task_transform = PythonOperator(
+        task_id='transform_data',
+        python_callable=transform_data,
+    )
+
+    # Task 3: Python function with XCom pull
+    def load_data(**context):
+        # Pull data from previous task via XCom
+        ti = context['ti']
+        data = ti.xcom_pull(task_ids='transform_data')
+        print(f"Loading data: {data}")
+        print(f"Total records: {data['patient_count'] + data['study_count']}")
+
+    task_load = PythonOperator(
+        task_id='load_data',
+        python_callable=load_data,
+    )
+
+    # ========================================================
+    # 4. Set Dependencies
+    # ========================================================
+    task_extract >> task_transform >> task_load
+```
+
+### DAG Structure Visualized
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    my_first_dag                         │
+│                    @daily schedule                      │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│    ┌───────────────┐                                    │
+│    │ extract_data  │  BashOperator                      │
+│    │ (echo command)│                                    │
+│    └───────┬───────┘                                    │
+│            │                                            │
+│            ▼                                            │
+│    ┌───────────────┐                                    │
+│    │transform_data │  PythonOperator                    │
+│    │ (process data)│  ───▶ pushes to XCom               │
+│    └───────┬───────┘                                    │
+│            │                                            │
+│            ▼                                            │
+│    ┌───────────────┐                                    │
+│    │  load_data    │  PythonOperator                    │
+│    │ (save results)│  ◀─── pulls from XCom              │
+│    └───────────────┘                                    │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Common Operators
+
+```
+┌────────────────────┬────────────────────────────────────────────┐
+│  OPERATOR          │  USE CASE                                  │
+├────────────────────┼────────────────────────────────────────────┤
+│  PythonOperator    │  Run Python functions                      │
+│  BashOperator      │  Run shell commands                        │
+│  PostgresOperator  │  Execute SQL on PostgreSQL                 │
+│  MySqlOperator     │  Execute SQL on MySQL                      │
+│  EmailOperator     │  Send email notifications                  │
+│  HttpOperator      │  Make HTTP requests (APIs)                 │
+│  DockerOperator    │  Run Docker containers                     │
+│  BranchOperator    │  Conditional branching                     │
+└────────────────────┴────────────────────────────────────────────┘
+```
+
+---
+
+## Dependency Patterns
+
+```python
+# Linear: A → B → C
+task_a >> task_b >> task_c
+
+# Fan-out: A → [B, C, D]
+task_a >> [task_b, task_c, task_d]
+
+# Fan-in: [A, B, C] → D
+[task_a, task_b, task_c] >> task_d
+
+# Complex:
+#       ┌─▶ B ─┐
+#   A ──┤      ├──▶ D
+#       └─▶ C ─┘
+
+task_a >> [task_b, task_c]
+[task_b, task_c] >> task_d
+```
+
+---
+
+## Real-World Example: Radiology Data Pipeline
+
+Here's a more realistic example relevant to your work:
+
+```python
+from datetime import datetime, timedelta
+from airflow import DAG
+from airflow.operators.python import PythonOperator, BranchPythonOperator
+from airflow.operators.bash import BashOperator
+from airflow.operators.empty import EmptyOperator
+
+default_args = {
+    'owner': 'radiology_ai_unit',
+    'retries': 2,
+    'retry_delay': timedelta(minutes=10),
+}
+
+with DAG(
+    dag_id='radiology_etl_pipeline',
+    default_args=default_args,
+    description='Daily radiology data ETL pipeline',
+    schedule='0 2 * * *',  # Run at 2 AM daily
+    start_date=datetime(2025, 1, 1),
+    catchup=False,
+    tags=['radiology', 'etl', 'production'],
+) as dag:
+
+    # ──────────────────────────────────────────────────────────
+    # EXTRACT: Pull data from PACS/RIS
+    # ──────────────────────────────────────────────────────────
+    def extract_dicom_metadata(**context):
+        """Simulate extracting DICOM metadata from PACS"""
+        execution_date = context['ds']  # YYYY-MM-DD
+        print(f"Extracting DICOM metadata for {execution_date}")
+        
+        # Simulated data (in reality, query PACS)
+        studies = [
+            {'study_uid': 'S001', 'modality': 'CT', 'body_part': 'CHEST'},
+            {'study_uid': 'S002', 'modality': 'MR', 'body_part': 'BRAIN'},
+            {'study_uid': 'S003', 'modality': 'CR', 'body_part': 'CHEST'},
+        ]
+        return studies
+
+    task_extract = PythonOperator(
+        task_id='extract_dicom_metadata',
+        python_callable=extract_dicom_metadata,
+    )
+
+    # ──────────────────────────────────────────────────────────
+    # VALIDATE: Check data quality
+    # ──────────────────────────────────────────────────────────
+    def validate_data(**context):
+        """Validate extracted data"""
+        ti = context['ti']
+        studies = ti.xcom_pull(task_ids='extract_dicom_metadata')
+        
+        if not studies:
+            raise ValueError("No studies found!")
+        
+        valid_modalities = {'CT', 'MR', 'CR', 'DX', 'US'}
+        for study in studies:
+            if study['modality'] not in valid_modalities:
+                raise ValueError(f"Invalid modality: {study['modality']}")
+        
+        print(f"✓ Validated {len(studies)} studies")
+        return len(studies)
+
+    task_validate = PythonOperator(
+        task_id='validate_data',
+        python_callable=validate_data,
+    )
+
+    # ──────────────────────────────────────────────────────────
+    # BRANCH: Decide processing path based on volume
+    # ──────────────────────────────────────────────────────────
+    def choose_processing_path(**context):
+        """Branch based on data volume"""
+        ti = context['ti']
+        study_count = ti.xcom_pull(task_ids='validate_data')
+        
+        if study_count > 100:
+            return 'process_large_batch'
+        else:
+            return 'process_small_batch'
+
+    task_branch = BranchPythonOperator(
+        task_id='choose_processing_path',
+        python_callable=choose_processing_path,
+    )
+
+    # ──────────────────────────────────────────────────────────
+    # TRANSFORM: Two processing paths
+    # ──────────────────────────────────────────────────────────
+    def process_batch(batch_size: str, **context):
+        ti = context['ti']
+        studies = ti.xcom_pull(task_ids='extract_dicom_metadata')
+        print(f"Processing {batch_size} batch: {len(studies)} studies")
+        
+        # Transform: add computed fields
+        for study in studies:
+            study['processed_at'] = datetime.now().isoformat()
+            study['ai_priority'] = 'HIGH' if study['body_part'] == 'CHEST' else 'NORMAL'
+        
+        return studies
+
+    task_large = PythonOperator(
+        task_id='process_large_batch',
+        python_callable=process_batch,
+        op_kwargs={'batch_size': 'LARGE'},
+    )
+
+    task_small = PythonOperator(
+        task_id='process_small_batch',
+        python_callable=process_batch,
+        op_kwargs={'batch_size': 'SMALL'},
+    )
+
+    # ──────────────────────────────────────────────────────────
+    # JOIN: Merge branches back together
+    # ──────────────────────────────────────────────────────────
+    task_join = EmptyOperator(
+        task_id='join_branches',
+        trigger_rule='none_failed_min_one_success',  # Important for branching
+    )
+
+    # ──────────────────────────────────────────────────────────
+    # LOAD: Save to database
+    # ──────────────────────────────────────────────────────────
+    def load_to_database(**context):
+        """Load processed data to database"""
+        ti = context['ti']
+        
+        # Try both possible upstream tasks
+        studies = (
+            ti.xcom_pull(task_ids='process_large_batch') or 
+            ti.xcom_pull(task_ids='process_small_batch')
+        )
+        
+        print(f"Loading {len(studies)} studies to database...")
+        for study in studies:
+            print(f"  → {study['study_uid']}: {study['modality']} | {study['ai_priority']}")
+        
+        print("✓ Load complete!")
+
+    task_load = PythonOperator(
+        task_id='load_to_database',
+        python_callable=load_to_database,
+        trigger_rule='none_failed_min_one_success',
+    )
+
+    # ──────────────────────────────────────────────────────────
+    # NOTIFY: Send completion notification
+    # ──────────────────────────────────────────────────────────
+    task_notify = BashOperator(
+        task_id='send_notification',
+        bash_command='echo "Pipeline completed at $(date)"',
+    )
+
+    # ──────────────────────────────────────────────────────────
+    # DEPENDENCIES
+    # ──────────────────────────────────────────────────────────
+    task_extract >> task_validate >> task_branch
+    task_branch >> [task_large, task_small] >> task_join >> task_load >> task_notify
+```
+
+### Pipeline Visualization
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│              radiology_etl_pipeline (2 AM daily)                 │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   ┌─────────────────────┐                                        │
+│   │ extract_dicom_meta  │  Query PACS for studies                │
+│   └──────────┬──────────┘                                        │
+│              │                                                   │
+│              ▼                                                   │
+│   ┌─────────────────────┐                                        │
+│   │   validate_data     │  Check data quality                    │
+│   └──────────┬──────────┘                                        │
+│              │                                                   │
+│              ▼                                                   │
+│   ┌─────────────────────┐                                        │
+│   │ choose_processing   │  Branch based on volume                │
+│   │      _path          │                                        │
+│   └──────────┬──────────┘                                        │
+│              │                                                   │
+│       ┌──────┴──────┐                                            │
+│       ▼             ▼                                            │
+│ ┌───────────┐ ┌───────────┐                                      │
+│ │  process  │ │  process  │                                      │
+│ │   large   │ │   small   │  (only one runs)                     │
+│ └─────┬─────┘ └─────┬─────┘                                      │
+│       │             │                                            │
+│       └──────┬──────┘                                            │
+│              ▼                                                   │
+│   ┌─────────────────────┐                                        │
+│   │   join_branches     │  Merge paths                           │
+│   └──────────┬──────────┘                                        │
+│              │                                                   │
+│              ▼                                                   │
+│   ┌─────────────────────┐                                        │
+│   │  load_to_database   │  Insert to PostgreSQL                  │
+│   └──────────┬──────────┘                                        │
+│              │                                                   │
+│              ▼                                                   │
+│   ┌─────────────────────┐                                        │
+│   │  send_notification  │  Alert team                            │
+│   └─────────────────────┘                                        │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Schedule Expressions
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│  PRESET         │  CRON EQUIVALENT  │  DESCRIPTION            │
+├───────────────────────────────────────────────────────────────┤
+│  @once          │  None             │  Run once then done     │
+│  @hourly        │  0 * * * *        │  Every hour             │
+│  @daily         │  0 0 * * *        │  Midnight daily         │
+│  @weekly        │  0 0 * * 0        │  Midnight Sunday        │
+│  @monthly       │  0 0 1 * *        │  1st of month           │
+│  None           │  None             │  Manual trigger only    │
+└───────────────────────────────────────────────────────────────┘
+
+CRON Format: ┌───────────── minute (0 - 59)
+             │ ┌─────────── hour (0 - 23)
+             │ │ ┌───────── day of month (1 - 31)
+             │ │ │ ┌─────── month (1 - 12)
+             │ │ │ │ ┌───── day of week (0 - 6, Sunday = 0)
+             │ │ │ │ │
+             * * * * *
+
+Examples:
+  '0 2 * * *'     = Every day at 2:00 AM
+  '30 8 * * 1-5'  = Weekdays at 8:30 AM
+  '0 */6 * * *'   = Every 6 hours
+```
+
+---
+
+## Key CLI Commands
+
+```bash
+# Check DAG syntax
+airflow dags list
+
+# Test a specific task
+airflow tasks test my_first_dag extract_data 2025-01-01
+
+# Trigger a DAG manually
+airflow dags trigger my_first_dag
+
+# View DAG runs
+airflow dags list-runs -d my_first_dag
+
+# Pause/Unpause a DAG
+airflow dags pause my_first_dag
+airflow dags unpause my_first_dag
+```
+
+---
+
+## Best Practices Summary
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     AIRFLOW BEST PRACTICES                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ✓ Keep tasks atomic (one task = one job)                       │
+│  ✓ Make tasks idempotent (re-running gives same result)         │
+│  ✓ Use meaningful task_ids and dag_ids                          │
+│  ✓ Set appropriate retries and retry_delay                      │
+│  ✓ Use catchup=False unless you need backfilling                │
+│  ✓ Avoid heavy computation in DAG definition file               │
+│  ✓ Use XCom sparingly (for small data only, <48KB)              │
+│  ✓ Store large data in external storage (S3, DB, files)         │
+│  ✓ Add tags for organization                                    │
+│  ✓ Test tasks individually before running full DAG              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Next Steps
+
+1. **Run `airflow standalone`** and explore the Web UI
+2. **Create the example DAGs** above in `~/airflow/dags/`
+3. **Trigger manually** and watch task execution
+4. **Explore TaskFlow API** (newer, cleaner Python syntax using decorators)
+5. **Learn Connections** for database/API integration
