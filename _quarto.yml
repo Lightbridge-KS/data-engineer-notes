@@ -13,6 +13,8 @@ book:
       chapters: 
         - text: OLAP for Radiology
           href: "contents/data_architect/OLAP-radiology-architect.qmd"
+        - text: DataHub
+          href: "contents/data_architect/datahub.qmd"
     - part: MinIO
       chapters: 
         - "contents/minio/minio-cheatsheet.qmd"

@@ -1,0 +1,207 @@
+---
+title: "Data Hub Explained"
+---
+
+The **Data Hub** is a centralized architecture pattern designed to solve the "spaghetti integration" problem while serving both **analytical** and **operational** use cases.
+
+## The Problem Data Hubs Solve
+
+Without a data hub, systems often connect directly to each other, creating a tangled mess:
+
+```
+    ┌─────────┐     ┌─────────┐     ┌─────────┐
+    │   EMR   │◄───►│  PACS   │◄───►│   LIS   │
+    └────┬────┘     └────┬────┘     └────┬────┘
+         │    \    /     │     \   /     │
+         │     \  /      │      \ /      │
+         │      \/       │       X       │
+         │      /\       │      / \      │
+         │     /  \      │     /   \     │
+    ┌────▼────┐     ┌────▼────┐     ┌────▼────┐
+    │   RIS   │◄───►│Billing  │◄───►│ AI App  │
+    └─────────┘     └─────────┘     └─────────┘
+    
+         "Point-to-Point Integration Chaos"
+              (n systems = n(n-1)/2 connections)
+```
+
+With 6 systems, you need up to **15 connections**. With 100 systems, that's **4,950 connections** to maintain!
+
+## Data Hub Architecture
+
+```
+                         ┌────────────────────────────────────────┐
+                         │              DATA HUB                  │
+    DATA SOURCES         │  ┌─────────────────────────────────┐   │     CONSUMERS
+                         │  │     Canonical Data Model        │   │
+  ┌──────────────┐       │  │  (Standardized Schema/Format)   │   │   ┌──────────────┐
+  │ Relational   │──────►│  └─────────────────────────────────┘   │──►│   Reports    │
+  │   (SQL)      │       │                                        │   └──────────────┘
+  └──────────────┘       │  ┌─────────────────────────────────┐   │
+                         │  │                                 │   │   ┌──────────────┐
+  ┌──────────────┐       │  │    ┌───────────────────────┐    │   │──►│ Applications │
+  │    JSON      │──────►│  │    │   Storage Layer       │    │   │   └──────────────┘
+  │   (APIs)     │       │  │    │  (Database/Files)     │    │   │
+  └──────────────┘       │  │    └───────────────────────┘    │   │   ┌──────────────┐
+                         │  │              ↑↓                 │   │──►│  Downstream  │
+  ┌──────────────┐       │  │    ┌───────────────────────┐    │   │   │   Systems    │
+  │    DICOM     │──────►│  │    │ Transformation/ETL    │    │   │   └──────────────┘
+  │  (Images)    │       │  │    └───────────────────────┘    │   │
+  └──────────────┘       │  │                                 │   │   ┌──────────────┐
+                         │  └─────────────────────────────────┘   │──►│  AI/ML       │
+  ┌──────────────┐       │                                        │   │  Pipelines   │
+  │   HL7/FHIR   │──────►│        ↻ Data Governance               │   └──────────────┘
+  │  (Clinical)  │       │        ↻ Master Data Management        │
+  └──────────────┘       └────────────────────────────────────────┘
+```
+
+## Key Characteristics
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                     DATA HUB FEATURES                              │
+├────────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│  1. CENTRALIZED INTEGRATION POINT                                  │
+│     • Single place where all data flows through                    │
+│     • Reduces connections from O(n²) to O(n)                       │
+│                                                                    │
+│  2. CANONICAL DATA MODEL                                           │
+│     • Common schema that all systems translate to/from             │
+│     • Each source maps once to the hub format                      │
+│                                                                    │
+│  3. BIDIRECTIONAL DATA FLOW                                        │
+│     • Not just for reading (like a warehouse)                      │
+│     • Can push data back to operational systems                    │
+│                                                                    │
+│  4. MASTER DATA MANAGEMENT                                         │
+│     • Single source of truth for key entities                      │
+│     • (Patients, Providers, Equipment, etc.)                       │
+│                                                                    │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+## Data Hub vs Data Warehouse vs Data Lake
+
+```
+┌─────────────────┬──────────────────┬──────────────────┬──────────────────┐
+│   Aspect        │    Data Hub      │  Data Warehouse  │    Data Lake     │
+├─────────────────┼──────────────────┼──────────────────┼──────────────────┤
+│ Primary Purpose │ Integration +    │ Analytics &      │ Store raw data   │
+│                 │ Data Exchange    │ Reporting        │ for exploration  │
+├─────────────────┼──────────────────┼──────────────────┼──────────────────┤
+│ Data Flow       │ Bidirectional    │ Mostly inbound   │ Mostly inbound   │
+│                 │ (in AND out)     │ (read-heavy)     │ (read-heavy)     │
+├─────────────────┼──────────────────┼──────────────────┼──────────────────┤
+│ Data Format     │ Canonical model  │ Structured       │ Raw (any format) │
+│                 │ (standardized)   │ (star schema)    │                  │
+├─────────────────┼──────────────────┼──────────────────┼──────────────────┤
+│ Use Cases       │ System-to-system │ Business Intel   │ Data Science     │
+│                 │ communication    │ Dashboards       │ ML Training      │
+├─────────────────┼──────────────────┼──────────────────┼──────────────────┤
+│ Latency         │ Near real-time   │ Batch (daily)    │ Varies           │
+└─────────────────┴──────────────────┴──────────────────┴──────────────────┘
+```
+
+---
+
+## Healthcare/Radiology Example
+
+Imagine a **Radiology Data Hub** at Ramathibodi Hospital:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    RADIOLOGY DATA HUB EXAMPLE                               │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+   SOURCES                      HUB                           CONSUMERS
+  ─────────                 ─────────────                    ───────────
+
+  ┌─────────┐              ┌─────────────┐
+  │  PACS   │─────────────►│             │              ┌─────────────────┐
+  │ (DICOM) │              │             │─────────────►│ Research DB     │
+  └─────────┘              │             │              │ (De-identified) │
+                           │   FHIR      │              └─────────────────┘
+  ┌─────────┐              │ Canonical   │
+  │   RIS   │─────────────►│   Model     │              ┌─────────────────┐
+  │ (HL7)   │◄─────────────│             │─────────────►│ AI Inference    │
+  └─────────┘              │             │              │ Pipeline        │
+                           │             │              └─────────────────┘
+  ┌─────────┐              │             │
+  │   EMR   │─────────────►│             │              ┌─────────────────┐
+  │ (FHIR)  │◄─────────────│             │─────────────►│ Dashboard &     │
+  └─────────┘              │             │              │ Reports         │
+                           │             │              └─────────────────┘
+  ┌─────────┐              │             │
+  │ AI App  │─────────────►│             │              ┌─────────────────┐
+  │(Results)│◄─────────────│             │─────────────►│ External        │
+  └─────────┘              └─────────────┘              │ Partners        │
+                                                       └─────────────────┘
+       
+       ◄──────── Bidirectional ────────►
+```
+
+**Workflow Example:**
+
+```
+1. STUDY ARRIVES
+   ┌──────┐    DICOM     ┌─────────┐    Transform   ┌─────────────┐
+   │ CT   │─────────────►│  PACS   │───────────────►│  DATA HUB   │
+   │Scan  │              └─────────┘                │ (FHIR Model)│
+   └──────┘                                         └──────┬──────┘
+                                                           │
+2. HUB ROUTES DATA                                         │
+                            ┌──────────────────────────────┼─────────────────┐
+                            │                              │                 │
+                            ▼                              ▼                 ▼
+                    ┌──────────────┐            ┌──────────────┐    ┌──────────────┐
+                    │ AI Detection │            │   Research   │    │  Analytics   │
+                    │   Service    │            │   Database   │    │  Dashboard   │
+                    └──────┬───────┘            └──────────────┘    └──────────────┘
+                           │
+3. AI WRITES BACK          │ Results
+                           ▼
+                    ┌─────────────┐     Update      ┌─────────────┐
+                    │  DATA HUB   │───────────────►│     RIS     │
+                    │             │                │  (Report)   │
+                    └─────────────┘                └─────────────┘
+```
+
+## Real-World Data Hub Products
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                    COMMON DATA HUB PLATFORMS                       │
+├────────────────────────────────────────────────────────────────────┤
+│                                                                    │
+│  ENTERPRISE/COMMERCIAL:                                            │
+│  • Informatica MDM Hub                                             │
+│  • Talend Data Hub                                                 │
+│  • Microsoft Azure Data Factory (can act as hub)                   │
+│  • AWS Glue + Lake Formation                                       │
+│                                                                    │
+│  HEALTHCARE SPECIFIC:                                              │
+│  • InterSystems HealthShare                                        │
+│  • Rhapsody Integration Engine                                     │
+│  • Google Cloud Healthcare API (FHIR-based)                        │
+│  • Azure API for FHIR                                              │
+│                                                                    │
+│  OPEN SOURCE:                                                      │
+│  • Apache NiFi (data flow automation)                              │
+│  • Apache Kafka (event streaming hub)                              │
+│  • Airbyte + dbt (modern data stack)                               │
+│                                                                    │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## When to Use a Data Hub?
+
+A data hub makes sense when:
+
+1. You have **many systems** that need to share data with each other
+2. You need **bidirectional** data flow (not just analytics)
+3. You want a **single source of truth** for master data (patients, studies, etc.)
+4. You're dealing with **multiple data formats** that need standardization
+5. **Operational integration** is as important as analytics
