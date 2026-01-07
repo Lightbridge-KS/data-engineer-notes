@@ -15,6 +15,8 @@ book:
           href: "contents/data_architect/event-driven-vs-task-based.qmd"
         - text: Task/Batch Processing Tech
           href: "contents/data_architect/batch-task-tech.qmd"
+        - text: Event Driven Tech
+          href: "contents/data_architect/event-driven-tech.qmd"
     - part: Data Solution
       chapters: 
         - text: OLAP for Radiology

@@ -1,0 +1,634 @@
+---
+title: "Event-Driven Architecture Technologies"
+---
+
+Let me break down each messaging/streaming platform's essence, architecture, and ideal use cases.
+
+---
+
+## 1. Apache Kafka
+
+**The Distributed Streaming Platform**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  APACHE KAFKA                                                   │
+│  "Distributed event streaming platform"                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Core Concept: DISTRIBUTED COMMIT LOG                           │
+│                                                                 │
+│  Topic: "radiology-events"                                      │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  Partition 0:  [0][1][2][3][4][5][6][7][8] ──▶ append   │    │
+│  │  Partition 1:  [0][1][2][3][4][5][6] ──▶ append         │    │
+│  │  Partition 2:  [0][1][2][3][4][5][6][7][8][9] ──▶       │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│       │                                                         │
+│       │  Messages are IMMUTABLE and ORDERED (per partition)     │
+│       │  Retained for configurable time (hours/days/forever)    │
+│       ▼                                                         │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  Consumer Group A          Consumer Group B             │    │
+│  │  ┌──────┐ ┌──────┐        ┌──────┐                      │    │
+│  │  │ C1   │ │ C2   │        │ C1   │                      │    │
+│  │  │ P0,1 │ │ P2   │        │P0,1,2│  (reads ALL)         │    │
+│  │  └──────┘ └──────┘        └──────┘                      │    │
+│  │  (partitions divided)     (independent offset)          │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  Cluster Architecture:                                          │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │              Kafka Cluster                              │    │
+│  │  ┌────────┐   ┌────────┐   ┌────────┐                   │    │
+│  │  │Broker 1│   │Broker 2│   │Broker 3│  (data nodes)     │    │
+│  │  └────────┘   └────────┘   └────────┘                   │    │
+│  │       │            │            │                       │    │
+│  │       └────────────┼────────────┘                       │    │
+│  │                    │                                    │    │
+│  │            ┌───────────────┐                            │    │
+│  │            │   ZooKeeper   │  (or KRaft in newer)       │    │
+│  │            │   / KRaft     │                            │    │
+│  │            └───────────────┘                            │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  Key Properties:                                                │
+│  • Pull-based consumers (consumers control pace)                │
+│  • Messages persist (replayable)                                │
+│  • Horizontal scaling via partitions                            │
+│  • Strong ordering within partition                             │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Essence:**
+- Originally from LinkedIn (2011), now Apache project
+- Not just messaging — it's a **distributed log**
+- Messages are retained (can replay history)
+- Designed for massive throughput (millions of msgs/sec)
+
+**Best For:**
+- High-throughput event streaming
+- Event sourcing / CQRS architectures
+- Real-time analytics pipelines
+- Log aggregation at scale
+- Microservices communication (when replay matters)
+
+**Pain Points:**
+- Operational complexity (ZooKeeper/KRaft, brokers, partitions)
+- Overkill for simple use cases
+- Consumer offset management
+- Not ideal for complex routing logic
+
+---
+
+## 2. RabbitMQ
+
+**The Traditional Message Broker**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  RABBITMQ                                                       │
+│  "The most widely deployed open source message broker"          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Core Concept: EXCHANGES + QUEUES + BINDINGS                    │
+│                                                                 │
+│  Producer ──▶ Exchange ──(routing)──▶ Queue ──▶ Consumer        │
+│                                                                 │
+│  Exchange Types:                                                │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │                                                         │    │
+│  │  DIRECT: Route by exact routing key match               │    │
+│  │  ┌──────────┐      routing_key="ct"      ┌─────────┐    │    │
+│  │  │ Exchange │─────────────────────────▶  │ CT Queue│    │    │
+│  │  │ (direct) │      routing_key="mri"     ├─────────┤    │    │
+│  │  └──────────┘─────────────────────────▶  │MRI Queue│    │    │
+│  │                                          └─────────┘    │    │
+│  │                                                         │    │
+│  │  FANOUT: Broadcast to ALL bound queues                  │    │
+│  │  ┌──────────┐                            ┌─────────┐    │    │
+│  │  │ Exchange │───────────────────────────▶│ Queue A │    │    │
+│  │  │ (fanout) │───────────────────────────▶│ Queue B │    │    │
+│  │  └──────────┘───────────────────────────▶│ Queue C │    │    │
+│  │                                          └─────────┘    │    │
+│  │                                                         │    │
+│  │  TOPIC: Pattern matching on routing key                 │    │
+│  │  ┌──────────┐    "scan.ct.urgent"        ┌─────────┐    │    │
+│  │  │ Exchange │───────────────────────────▶│urgent.* │    │    │
+│  │  │ (topic)  │    "scan.mri.routine"      ├─────────┤    │    │
+│  │  └──────────┘───────────────────────────▶│scan.#   │    │    │
+│  │               (* = one word, # = zero+)  └─────────┘    │    │
+│  │                                                         │    │
+│  │  HEADERS: Route by message headers (not routing key)    │    │
+│  │                                                         │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  Message Flow with Acknowledgment:                              │
+│  ┌────────┐    ┌──────────┐    ┌───────┐    ┌──────────┐        │
+│  │Producer│───▶│ Exchange │───▶│ Queue │───▶│ Consumer │        │
+│  └────────┘    └──────────┘    └───────┘    └────┬─────┘        │
+│                                    ▲             │              │
+│                                    │    ACK/NACK │              │
+│                                    └─────────────┘              │
+│                                (message removed after ACK)      │
+│                                                                 │
+│  Key Properties:                                                │
+│  • Push-based (broker pushes to consumers)                      │
+│  • Messages deleted after acknowledgment                        │
+│  • Complex routing logic built-in                               │
+│  • AMQP protocol (interoperable)                                │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Essence:**
+- Implements AMQP (Advanced Message Queuing Protocol)
+- Smart broker, simple consumers
+- Rich routing capabilities
+- Messages typically consumed once then deleted
+
+**Best For:**
+- Complex routing requirements
+- Task queues / work distribution
+- RPC (Remote Procedure Call) patterns
+- When you need message acknowledgment guarantees
+- Polyglot environments (many language clients)
+
+**Pain Points:**
+- No built-in replay (messages deleted after consumption)
+- Scaling requires clustering knowledge
+- Can become bottleneck at very high throughput
+- More memory-intensive than Kafka
+
+---
+
+## 3. AWS SQS / SNS
+
+**The Serverless AWS Messaging Duo**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  AWS SQS (Simple Queue Service)                                 │
+│  "Fully managed message queuing"                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Core Concept: MANAGED QUEUE (point-to-point)                   │
+│                                                                 │
+│  ┌──────────┐      ┌─────────────────────┐      ┌──────────┐    │
+│  │ Producer │─────▶│    SQS Queue        │─────▶│ Consumer │    │
+│  └──────────┘      │  ┌───┬───┬───┬───┐  │      └──────────┘    │
+│                    │  │msg│msg│msg│msg│  │                      │
+│                    │  └───┴───┴───┴───┘  │                      │
+│                    └─────────────────────┘                      │
+│                                                                 │
+│  Two Queue Types:                                               │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  STANDARD                    FIFO                       │    │
+│  │  • Unlimited throughput      • 300 msg/s (3000 batch)   │    │
+│  │  • At-least-once delivery    • Exactly-once processing  │    │
+│  │  • Best-effort ordering      • Strict ordering          │    │
+│  │  • Cheaper                   • More expensive           │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  Visibility Timeout:                                            │
+│  ┌───────────────────────────────────────────────────────┐      │
+│  │  Consumer receives msg ──▶ msg becomes "invisible"    │      │
+│  │  Consumer processes     ──▶ deletes msg (success)     │      │
+│  │       OR                                              │      │
+│  │  Timeout expires        ──▶ msg visible again (retry) │      │
+│  └───────────────────────────────────────────────────────┘      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  AWS SNS (Simple Notification Service)                          │
+│  "Pub/Sub messaging and mobile notifications"                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Core Concept: TOPIC (pub/sub fanout)                           │
+│                                                                 │
+│                    ┌─────────────────┐                          │
+│  ┌──────────┐      │   SNS Topic     │      ┌─────────────┐     │
+│  │ Publisher│─────▶│ "scan-complete" │─────▶│ SQS Queue   │     │
+│  └──────────┘      │                 │─────▶│ Lambda      │     │
+│                    │                 │─────▶│ HTTP/S      │     │
+│                    │                 │─────▶│ Email       │     │
+│                    │                 │─────▶│ SMS         │     │
+│                    └─────────────────┘      └─────────────┘     │
+│                                                                 │
+│  Message Filtering (per subscription):                          │
+│  ┌───────────────────────────────────────────────────────┐      │
+│  │  Filter Policy: {"modality": ["CT", "MRI"]}           │      │
+│  │  Only messages with matching attributes are delivered │      │
+│  └───────────────────────────────────────────────────────┘      │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  COMMON PATTERN: SNS + SQS (Fan-out)                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│              ┌──────────────┐                                   │
+│              │  SNS Topic   │                                   │
+│              └──────┬───────┘                                   │
+│         ┌──────────┬┴┬──────────┐                               │
+│         ▼          ▼ ▼          ▼                               │
+│    ┌────────┐ ┌────────┐ ┌────────┐                             │
+│    │SQS: AI │ │SQS:PACS│ │SQS:Notif│                            │
+│    │Process │ │ Update │ │ Service │                            │
+│    └───┬────┘ └───┬────┘ └───┬────┘                             │
+│        ▼          ▼          ▼                                  │
+│    ┌────────┐ ┌────────┐ ┌────────┐                             │
+│    │ Lambda │ │ Lambda │ │ Lambda │                             │
+│    └────────┘ └────────┘ └────────┘                             │
+│                                                                 │
+│  Why? Each queue = independent processing, retry, DLQ           │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Essence:**
+- Fully managed, zero infrastructure
+- SQS = point-to-point queuing
+- SNS = pub/sub topics
+- Deep AWS ecosystem integration
+
+**Best For:**
+- AWS-native serverless architectures
+- Decoupling Lambda functions
+- Fan-out patterns (SNS → multiple SQS)
+- Teams wanting zero operational overhead
+- Variable/bursty workloads
+
+**Pain Points:**
+- No message replay (once deleted, gone)
+- Standard queues have no ordering guarantee
+- FIFO queues have throughput limits
+- Vendor lock-in
+- Limited filtering compared to RabbitMQ
+
+---
+
+## 4. Google Cloud Pub/Sub
+
+**The Globally Distributed Messaging Service**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  GOOGLE CLOUD PUB/SUB                                           │
+│  "Global messaging and event ingestion"                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Core Concept: TOPICS + SUBSCRIPTIONS                           │
+│                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │                                                          │   │
+│  │  Publisher ──▶ Topic ──┬──▶ Subscription A ──▶ Consumer  │   │
+│  │                        │                                 │   │
+│  │                        ├──▶ Subscription B ──▶ Consumer  │   │
+│  │                        │         │                       │   │
+│  │                        │         └──▶ Consumer (shared)  │   │
+│  │                        │                                 │   │
+│  │                        └──▶ Subscription C ──▶ BigQuery  │   │
+│  │                                              (push)      │   │
+│  │                                                          │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  Subscription Types:                                            │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  PULL                          PUSH                     │    │
+│  │  • Subscriber polls for msgs   • Pub/Sub sends to URL   │    │
+│  │  • More control                • Webhook-style          │    │
+│  │  • Long polling available      • Good for Cloud Run     │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  Key Features:                                                  │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │                                                         │    │
+│  │  • Global by default (multi-region replication)         │    │
+│  │  • Message retention: up to 31 days                     │    │
+│  │  • Seek & Replay: rewind subscription to timestamp      │    │
+│  │  • Dead Letter Topics: failed message handling          │    │
+│  │  • Ordering Keys: order within same key                 │    │
+│  │  • Filtering: SQL-like attribute filters                │    │
+│  │  • Schema Registry: enforce message schemas             │    │
+│  │                                                         │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  Architecture (Managed):                                        │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │     ┌─────────────────────────────────────────────┐     │    │
+│  │     │         Google's Global Network             │     │    │
+│  │     │                                             │     │    │
+│  │     │  ┌─────────┐  ┌─────────┐  ┌─────────┐      │     │    │
+│  │     │  │Region A │  │Region B │  │Region C │      │     │    │
+│  │     │  │(replica)│  │(replica)│  │(replica)│      │     │    │
+│  │     │  └─────────┘  └─────────┘  └─────────┘      │     │    │
+│  │     │                                             │     │    │
+│  │     └─────────────────────────────────────────────┘     │    │
+│  │                                                         │    │
+│  │  You just see: Topic → Subscriptions                    │    │
+│  │  (All complexity hidden)                                │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Essence:**
+- Globally distributed from the start
+- Combines queue + pub/sub semantics
+- Message replay capability (seek)
+- Tightly integrated with GCP data stack
+
+**Best For:**
+- GCP-native architectures
+- Global event distribution
+- Streaming into BigQuery, Dataflow
+- When you need message replay without Kafka complexity
+- Multi-region applications
+
+**Pain Points:**
+- Vendor lock-in (GCP)
+- Slightly higher latency than regional solutions
+- Cost can add up at high volume
+- Less flexible routing than RabbitMQ
+
+---
+
+## 5. Redis Streams
+
+**The Lightweight In-Memory Stream**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  REDIS STREAMS                                                  │
+│  "Log data structure in Redis (since v5.0)"                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Core Concept: APPEND-ONLY LOG with CONSUMER GROUPS             │
+│                                                                 │
+│  Stream: "dicom-events"                                         │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │ ID              Fields (hash-like)                      │    │
+│  │ ─────────────── ─────────────────────────────────────── │    │
+│  │ 1699000001-0    study_uid=1.2.3  modality=CT            │    │
+│  │ 1699000002-0    study_uid=1.2.4  modality=MRI           │    │
+│  │ 1699000003-0    study_uid=1.2.5  modality=CT            │    │
+│  │ 1699000004-0    study_uid=1.2.6  modality=XR   ◀─ HEAD  │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│        │                                                        │
+│        │  ID = milliseconds-sequence (auto or manual)           │
+│        │                                                        │
+│        ▼                                                        │
+│  Consumer Groups (Kafka-like semantics):                        │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  Group: "ai-workers"                                    │    │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐               │    │
+│  │  │Consumer 1│  │Consumer 2│  │Consumer 3│               │    │
+│  │  │ (busy)   │  │ (idle)   │  │ (busy)   │               │    │
+│  │  └──────────┘  └──────────┘  └──────────┘               │    │
+│  │                                                         │    │
+│  │  • Each message delivered to ONE consumer in group      │    │
+│  │  • Pending Entries List (PEL) tracks unacknowledged     │    │
+│  │  • XACK to acknowledge, XCLAIM to reassign stuck msgs   │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  Group: "audit-logger"                                  │    │
+│  │  ┌──────────┐                                           │    │
+│  │  │Consumer 1│   (reads ALL messages independently)      │    │
+│  │  └──────────┘                                           │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  Key Commands:                                                  │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  XADD      - Add entry to stream                        │    │
+│  │  XREAD     - Read entries (simple consumer)             │    │
+│  │  XREADGROUP- Read as consumer group member              │    │
+│  │  XACK      - Acknowledge processed message              │    │
+│  │  XPENDING  - Check unacknowledged messages              │    │
+│  │  XCLAIM    - Take over stuck messages                   │    │
+│  │  XTRIM     - Limit stream size                          │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  Simplicity (if you already have Redis):                        │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  No new infrastructure!                                 │    │
+│  │                                                         │    │
+│  │  ┌──────────────────────────────────────────┐           │    │
+│  │  │             Your Redis                   │           │    │
+│  │  │  ┌────────┐ ┌────────┐ ┌────────┐        │           │    │
+│  │  │  │ Cache  │ │Pub/Sub │ │Streams │ ◀─NEW  │           │    │
+│  │  │  └────────┘ └────────┘ └────────┘        │           │    │
+│  │  └──────────────────────────────────────────┘           │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Essence:**
+- Part of Redis (not a separate system)
+- Kafka-like semantics but simpler
+- In-memory with optional persistence
+- Perfect "good enough" streaming
+
+**Best For:**
+- Teams already using Redis
+- Lightweight event streaming
+- When Kafka is overkill
+- Low-latency requirements (microseconds)
+- Simpler operational model
+
+**Pain Points:**
+- Limited by single Redis instance (or cluster complexity)
+- No built-in partitioning like Kafka
+- Memory-bound (expensive at large scale)
+- Less ecosystem/tooling than Kafka
+- Persistence is optional (data loss risk if not configured)
+
+---
+
+## Decision Matrix
+
+| Criteria | Kafka | RabbitMQ | AWS SQS/SNS | GCP Pub/Sub | Redis Streams |
+|----------|-------|----------|-------------|-------------|---------------|
+| **Primary Use Case** | High-throughput streaming | Complex routing / tasks | Serverless AWS | GCP event streaming | Lightweight streaming |
+| **Model** | Distributed log | Message broker | Managed queue | Managed pub/sub | In-memory log |
+| **Message Retention** | ✅ Configurable (days/∞) | ❌ Deleted on ACK | ❌ Deleted on ACK | ✅ Up to 31 days | ✅ Configurable |
+| **Replay Capability** | ✅ Full replay | ❌ No | ❌ No | ✅ Seek to timestamp | ✅ By ID |
+| **Ordering** | ✅ Per partition | ⚠️ Per queue | ⚠️ FIFO queues only | ⚠️ Per ordering key | ✅ Per stream |
+| **Throughput** | ⭐⭐⭐⭐⭐ Millions/sec | ⭐⭐⭐ ~50K/sec | ⭐⭐⭐⭐ ~unlimited* | ⭐⭐⭐⭐ ~unlimited* | ⭐⭐⭐⭐ ~100K+/sec |
+| **Latency** | Low (ms) | Very Low (ms) | Medium (10-100ms) | Medium (10-100ms) | Very Low (μs-ms) |
+| **Routing Flexibility** | ⚠️ Basic (topics) | ✅ Rich (exchanges) | ⚠️ SNS filtering | ⚠️ Attribute filters | ❌ Manual |
+| **Delivery Guarantee** | At-least-once / Exactly-once | At-least-once | At-least-once | At-least-once | At-least-once |
+| **Managed Option** | Confluent, MSK, etc. | CloudAMQP, AmazonMQ | ✅ Native AWS | ✅ Native GCP | Redis Cloud |
+| **Self-Hosted Complexity** | High | Medium | N/A (managed) | N/A (managed) | Low |
+| **Infrastructure** | Brokers + ZK/KRaft | Erlang cluster | None | None | Redis server |
+| **Multi-Region** | ⚠️ MirrorMaker | ⚠️ Federation | ⚠️ Cross-region | ✅ Native | ❌ Manual |
+| **Cost Model** | Infra / managed fee | Infra / managed fee | Per request | Per data volume | Infra / managed fee |
+| **Ecosystem** | ⭐⭐⭐⭐⭐ Huge | ⭐⭐⭐⭐ Large | ⭐⭐⭐⭐ AWS | ⭐⭐⭐ GCP | ⭐⭐⭐ Redis |
+| **Learning Curve** | High | Medium | Low | Low | Low-Medium |
+
+*Managed services scale automatically but have soft limits
+
+---
+
+## Detailed Comparison by Dimension
+
+### Message Persistence & Replay
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  CAN I REPLAY MESSAGES?                                         │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Kafka:        ████████████████████████████  Full replay        │
+│                Keep for days/weeks/forever                      │
+│                                                                 │
+│  GCP Pub/Sub:  ████████████████████         Seek to timestamp   │
+│                Up to 31 days retention                          │
+│                                                                 │
+│  Redis:        ████████████████             By message ID       │
+│                Limited by memory/config                         │
+│                                                                 │
+│  RabbitMQ:     ████                         No replay           │
+│                Messages deleted after ACK                       │
+│                                                                 │
+│  SQS/SNS:      ████                         No replay           │
+│                Messages deleted after processing                │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Routing Complexity
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  HOW COMPLEX CAN MY ROUTING BE?                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  RabbitMQ:     ████████████████████████████  Most flexible      │
+│                Direct, fanout, topic, headers exchanges         │
+│                                                                 │
+│  SNS:          ████████████████             Filter policies     │
+│                Attribute-based filtering                        │
+│                                                                 │
+│  GCP Pub/Sub:  ████████████████             SQL-like filters    │
+│                Attribute filters per subscription               │
+│                                                                 │
+│  Kafka:        ████████                     Topic-based only    │
+│                Use Kafka Streams for complex routing            │
+│                                                                 │
+│  Redis:        ████                         Manual in code      │
+│                No built-in routing                              │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Scenario-Based Recommendations
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  "I want to..."                          Recommended Tool       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Stream millions of events/sec with      ──────▶  Kafka         │
+│  replay capability                                              │
+│                                                                 │
+│  Route messages by complex rules         ──────▶  RabbitMQ      │
+│  (topic patterns, headers)                                      │
+│                                                                 │
+│  Build serverless AWS architecture       ──────▶  SQS + SNS     │
+│  with Lambda triggers                                           │
+│                                                                 │
+│  Stream events globally on GCP           ──────▶  Pub/Sub       │
+│  into BigQuery/Dataflow                                         │
+│                                                                 │
+│  Add simple streaming to existing        ──────▶  Redis Streams │
+│  Redis setup                                                    │
+│                                                                 │
+│  Event sourcing / audit log              ──────▶  Kafka         │
+│  (need full history)                              or GCP Pub/Sub│
+│                                                                 │
+│  Distribute background jobs              ──────▶  RabbitMQ      │
+│  to worker pool                                   or SQS        │
+│                                                                 │
+│  Real-time analytics pipeline            ──────▶  Kafka         │
+│  at scale                                         (+ Flink/Spark)│
+│                                                                 │
+│  Simple pub/sub, minimize ops            ──────▶  GCP Pub/Sub   │
+│                                                   or SNS        │
+│                                                                 │
+│  Lowest latency possible                 ──────▶  Redis Streams │
+│  (microseconds matter)                                          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## For Your Context (Radiology AI Unit)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  RECOMMENDED APPROACH                                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Starting Out / Small Scale:                                    │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  Redis Streams                                          │    │
+│  │  • You likely already have/need Redis for caching       │    │
+│  │  • Simple to set up and understand                      │    │
+│  │  • Good enough for <100K events/day                     │    │
+│  │  • Python client: redis-py                              │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  Cloud-Native (if using GCP/AWS):                               │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  GCP: Pub/Sub ──▶ Cloud Run/Functions ──▶ BigQuery      │    │
+│  │  AWS: SNS+SQS ──▶ Lambda ──▶ S3/RDS                     │    │
+│  │                                                         │    │
+│  │  • Zero infrastructure management                       │    │
+│  │  • Scales automatically                                 │    │
+│  │  • Pay per use (good for variable load)                 │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  Growing / Need Replay:                                         │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  Kafka (managed: Confluent Cloud, AWS MSK)              │    │
+│  │  • When you need to replay DICOM processing events      │    │
+│  │  • Audit trail for AI predictions                       │    │
+│  │  • Multiple consumers reading same stream               │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+│  Example Architecture:                                          │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │                                                         │    │
+│  │  PACS ──▶ DICOM Router ──▶ [Redis Stream / Pub/Sub]     │    │
+│  │                                    │                    │    │
+│  │                    ┌───────────────┼───────────────┐    │    │
+│  │                    ▼               ▼               ▼    │    │
+│  │               ┌────────┐    ┌──────────┐    ┌────────┐  │    │
+│  │               │AI Triage│   │Worklist  │    │Audit   │  │    │
+│  │               │Service  │   │Update    │    │Logger  │  │    │
+│  │               └────────┘    └──────────┘    └────────┘  │    │
+│  │                                                         │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Quick Start Recommendation
+
+Given your Python background, here's my suggestion:
+
+| Scale | Recommendation | Why |
+|-------|---------------|-----|
+| **Learning/POC** | Redis Streams | Simple, you likely have Redis, great Python support |
+| **Production (Cloud)** | GCP Pub/Sub or AWS SQS+SNS | Zero ops, auto-scaling |
+| **Production (Self-hosted)** | Start with Redis Streams, graduate to Kafka | Progressive complexity |
