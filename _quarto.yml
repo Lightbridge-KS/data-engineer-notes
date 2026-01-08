@@ -23,6 +23,8 @@ book:
           href: "contents/data_architect/OLAP-radiology-architect.qmd"
         - text: DataHub
           href: "contents/data_architect/datahub.qmd"
+        - text: CDC and Database Replication
+          href: "contents/cdc/database-rep-cdc.qmd"
     - part: RDW
       chapters: 
         - text: RDW data transfer

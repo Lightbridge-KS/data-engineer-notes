@@ -1,0 +1,216 @@
+---
+title: "Database Replication & CDC (Change Data Capture)"
+---
+
+## The Core Problem
+
+Imagine you have a **production database** (e.g., storing radiology reports, patient metadata) and you need to:
+- Sync data to an **analytics warehouse** for reporting
+- Keep a **backup database** in sync
+- Feed data into a **real-time dashboard** or ML pipeline
+
+The naive approach—running periodic `SELECT * FROM table`—is slow, resource-intensive, and misses changes between queries.
+
+**CDC solves this by capturing changes as they happen.**
+
+---
+
+## What is CDC?
+
+CDC (Change Data Capture) is a pattern that **detects and captures changes** (INSERT, UPDATE, DELETE) from a database and streams them to other systems.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        CDC Conceptual Flow                          │
+└─────────────────────────────────────────────────────────────────────┘
+
+  Source Database                                    Destinations
+  ───────────────                                    ────────────
+
+  ┌──────────────┐                                 ┌──────────────┐
+  │  PostgreSQL  │                                 │  Data Lake   │
+  │              │      ┌─────────────────┐        │  (S3/GCS)    │
+  │  [Patients]  │─────▶│   CDC Engine    │───────▶└──────────────┘
+  │  [Reports]   │      │                 │        
+  │  [Studies]   │      │  Captures:      │        ┌──────────────┐
+  └──────────────┘      │  • INSERTs      │───────▶│  Warehouse   │
+         │              │  • UPDATEs      │        │  (BigQuery)  │
+         │              │  • DELETEs      │        └──────────────┘
+         ▼              └─────────────────┘        
+  ┌──────────────┐              │                  ┌──────────────┐
+  │ Transaction  │              └─────────────────▶│  Kafka/Queue │
+  │ Log (WAL)    │                                 │  (Real-time) │
+  └──────────────┘                                 └──────────────┘
+```
+
+---
+
+## Two Main CDC Approaches
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                      CDC Implementation Methods                    │
+├────────────────────────────────┬───────────────────────────────────┤
+│      Log-Based CDC             │       Query-Based CDC             │
+│      (Debezium)                │       (Airbyte, Fivetran)         │
+├────────────────────────────────┼───────────────────────────────────┤
+│                                │                                   │
+│  Reads database's internal     │  Periodically queries tables      │
+│  transaction log (WAL/binlog)  │  using timestamps or checksums    │
+│                                │                                   │
+│  ┌─────────┐    ┌─────────┐    │  ┌─────────┐    ┌─────────┐       │
+│  │   DB    │───▶│   WAL   │    │  │   DB    │◀───│ SELECT  │       │
+│  └─────────┘    └────┬────┘    │  └─────────┘    │ WHERE   │       │
+│                      │         │                 │updated> │       │
+│                      ▼         │                 └─────────┘       │
+│               ┌──────────┐     │                                   │
+│               │ Debezium │     │                                   │
+│               └──────────┘     │                                   │
+│                                │                                   │
+│  ✓ Real-time (milliseconds)    │  ✓ Simpler setup                  │
+│  ✓ Captures ALL changes        │  ✓ Works with any database        │
+│  ✓ No impact on source DB      │  ✗ Latency (minutes to hours)     │
+│  ✗ Complex setup               │  ✗ May miss rapid changes         │
+│  ✗ DB-specific                 │  ✗ Requires timestamp columns     │
+└────────────────────────────────┴───────────────────────────────────┘
+```
+
+---
+
+## Debezium vs Airbyte
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Tool Comparison                                  │
+├──────────────────────────────┬──────────────────────────────────────┤
+│         DEBEZIUM             │            AIRBYTE                   │
+├──────────────────────────────┼──────────────────────────────────────┤
+│                              │                                      │
+│  • Pure CDC tool             │  • Full ELT platform                 │
+│  • Log-based (real-time)     │  • Supports both CDC & batch         │
+│  • Outputs to Kafka          │  • 300+ connectors (APIs, DBs, etc.) │
+│  • Self-hosted (complex)     │  • UI for configuration              │
+│  • Best for streaming        │  • Best for general data integration │
+│                              │                                      │
+│  Use when:                   │  Use when:                           │
+│  ─────────                   │  ─────────                           │
+│  • Need sub-second latency   │  • Want easy setup                   │
+│  • Building event-driven     │  • Need many source types            │
+│    architecture              │  • Batch sync is acceptable          │
+│  • Have Kafka infrastructure │  • Don't want to manage Kafka        │
+│                              │                                      │
+└──────────────────────────────┴──────────────────────────────────────┘
+```
+
+---
+
+## Typical Architecture with Debezium
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                  Debezium + Kafka Architecture                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌────────────┐     ┌────────────┐     ┌────────────┐     ┌───────────┐
+│ PostgreSQL │     │  Debezium  │     │   Kafka    │     │ Consumer  │
+│            │     │ Connector  │     │            │     │           │
+│ ┌────────┐ │     │            │     │ ┌────────┐ │     │ ┌───────┐ │
+│ │ Table  │─┼────▶│  Reads     │────▶│ │ Topic  │─┼────▶│ │Spark  │ │
+│ └────────┘ │     │  WAL       │     │ │patients│ │     │ └───────┘ │
+│            │     │            │     │ └────────┘ │     │           │
+│ ┌────────┐ │     │  Converts  │     │ ┌────────┐ │     │ ┌───────┐ │
+│ │  WAL   │─┼────▶│  to JSON   │────▶│ │ Topic  │─┼────▶│ │ Flink │ │
+│ └────────┘ │     │  events    │     │ │studies │ │     │ └───────┘ │
+└────────────┘     └────────────┘     │ └────────┘ │     │           │
+                                      └────────────┘     │ ┌───────┐ │
+                                                         │ │BigQry │ │
+                                                         │ └───────┘ │
+                                                         └───────────┘
+
+Event Example (JSON):
+{
+  "op": "u",              // u=update, c=create, d=delete
+  "before": {"id": 1, "status": "pending"},
+  "after":  {"id": 1, "status": "completed"},
+  "source": {"table": "studies", "ts_ms": 1704700000000}
+}
+```
+
+---
+
+## Typical Architecture with Airbyte
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Airbyte ELT Architecture                        │
+└─────────────────────────────────────────────────────────────────────┘
+
+       SOURCES                    AIRBYTE                  DESTINATIONS
+    ┌───────────┐              ┌───────────┐             ┌─────────────┐
+    │ PostgreSQL│─────────────▶│           │────────────▶│  BigQuery   │
+    └───────────┘              │           │             └─────────────┘
+    ┌───────────┐              │   Web UI  │             ┌─────────────┐
+    │   MySQL   │─────────────▶│     +     │────────────▶│  Snowflake  │
+    └───────────┘              │ Scheduler │             └─────────────┘
+    ┌───────────┐              │           │             ┌─────────────┐
+    │ REST API  │─────────────▶│  • Sync   │────────────▶│  S3 / GCS   │
+    │ (PACS?)   │              │    hourly │             └─────────────┘
+    └───────────┘              │  • Transform            ┌─────────────┐
+    ┌───────────┐              │  • Monitor │───────────▶│  Postgres   │
+    │Google Shts│─────────────▶│           │             │  (replica)  │
+    └───────────┘              └───────────┘             └─────────────┘
+
+Sync Modes:
+• Full Refresh  - Re-copy everything each sync
+• Incremental   - Only new/changed rows (needs cursor column)
+• CDC           - Uses Debezium under the hood (for supported DBs)
+```
+
+---
+
+## Healthcare/Radiology Use Case
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│            Example: Radiology Data Pipeline                         │
+└─────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────┐       ┌─────────────┐       ┌─────────────────────┐
+  │    PACS     │       │     RIS     │       │   AI Inference DB   │
+  │  (Images)   │       │  (Reports)  │       │   (Predictions)     │
+  └──────┬──────┘       └──────┬──────┘       └──────────┬──────────┘
+         │                     │                         │
+         │         CDC / Airbyte Sync                    │
+         └─────────────────────┼─────────────────────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │   Analytics         │
+                    │   Data Warehouse    │
+                    │                     │
+                    │  • Study volumes    │
+                    │  • AI accuracy      │
+                    │  • Turnaround time  │
+                    │  • Pathology trends │
+                    └─────────────────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              ▼                ▼                ▼
+        ┌──────────┐    ┌──────────┐    ┌──────────┐
+        │Dashboard │    │ ML Model │    │ Research │
+        │(Metabase)│    │ Training │    │ Queries  │
+        └──────────┘    └──────────┘    └──────────┘
+```
+
+---
+
+## Quick Summary
+
+| Aspect | Debezium | Airbyte |
+|--------|----------|---------|
+| **Primary Use** | Real-time CDC streaming | General data integration |
+| **Latency** | Milliseconds | Minutes to hours |
+| **Setup** | Complex (needs Kafka) | Easy (Web UI) |
+| **Best For** | Event-driven systems | Analytics pipelines |
+
+**Start with Airbyte** if you want to sync data to a warehouse for analytics. **Use Debezium** if you need real-time event streaming or are building event-driven microservices.
