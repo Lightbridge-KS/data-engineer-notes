@@ -25,6 +25,8 @@ book:
           href: "contents/data_architect/datahub.qmd"
         - text: CDC and Database Replication
           href: "contents/cdc/database-rep-cdc.qmd"
+        - text: Data pipeline tools
+          href: "contents/tools/data-pipeline-tools.qmd"
     - part: RDW
       chapters: 
         - text: RDW data transfer

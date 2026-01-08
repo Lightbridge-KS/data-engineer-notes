@@ -1,0 +1,211 @@
+---
+title: "Data Pipeline Tools Comparison"
+---
+
+Here's a breakdown of these four tools, arranged chronologically:
+
+```
+Timeline
+════════════════════════════════════════════════════════════════════════
+2014      2016        2018         2022
+ │         │           │            │
+ ▼         ▼           ▼            ▼
+Airflow   dbt        Prefect     SQLMesh
+ │         │           │            │
+ │         │           │            └─► Transformation (SQL-first, modern dbt alternative)
+ │         │           │
+ │         │           └─► Orchestration (modern, Pythonic)
+ │         │
+ │         └─► Transformation (SQL-first, ELT)
+ │
+ └─► Orchestration (DAG-based, general-purpose)
+```
+
+---
+
+## Category Overview
+
+These tools fall into **two distinct categories**:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                      DATA PIPELINE LANDSCAPE                        │
+├─────────────────────────────┬───────────────────────────────────────┤
+│     ORCHESTRATION           │        TRANSFORMATION                 │
+│   (When & How to run)       │      (What to compute)                │
+├─────────────────────────────┼───────────────────────────────────────┤
+│  • Apache Airflow           │  • dbt                                │
+│  • Prefect                  │  • SQLMesh                            │
+├─────────────────────────────┴───────────────────────────────────────┤
+│  Note: Orchestrators can RUN transformation tools like dbt/SQLMesh  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 1. Apache Airflow (2014)
+
+| Attribute | Details |
+|-----------|---------|
+| **Created by** | Airbnb (open-sourced 2015, Apache top-level 2019) |
+| **Category** | Workflow Orchestration |
+| **Open Source** | ✅ Yes (Apache 2.0) |
+| **Self-Hosted** | ✅ Yes |
+| **Language** | Python |
+
+**What it does:** General-purpose workflow scheduler using Directed Acyclic Graphs (DAGs). You define tasks and dependencies in Python, and Airflow handles scheduling, retries, and monitoring.
+
+```python
+# Airflow DAG example
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+
+with DAG('my_pipeline', schedule='@daily') as dag:
+    task1 = PythonOperator(task_id='extract', python_callable=extract_fn)
+    task2 = PythonOperator(task_id='transform', python_callable=transform_fn)
+    task1 >> task2  # task1 runs before task2
+```
+
+**Pros:** Battle-tested, huge community, extensive integrations.  
+**Cons:** Complex setup, DAGs are static (defined at parse time), can be verbose.
+
+---
+
+## 2. dbt (2016)
+
+| Attribute | Details |
+|-----------|---------|
+| **Created by** | Fishtown Analytics (now dbt Labs) |
+| **Category** | Data Transformation |
+| **Open Source** | ✅ dbt-core is open source (Apache 2.0) |
+| **Self-Hosted** | ✅ Yes (dbt-core), or use dbt Cloud (SaaS) |
+| **Language** | SQL + Jinja templating |
+
+**What it does:** Focuses on the **"T" in ELT** — transforming data already loaded into your warehouse using SQL. It brings software engineering practices (version control, testing, documentation) to SQL transformations.
+
+```sql
+-- models/staging/stg_patients.sql
+SELECT
+    patient_id,
+    UPPER(name) as patient_name,
+    DATE(created_at) as admission_date
+FROM {{ source('hospital', 'raw_patients') }}
+```
+
+**Pros:** SQL-first (accessible to analysts), great documentation generation, testing built-in.  
+**Cons:** Only handles transformation (needs orchestrator for full pipeline), limited to SQL.
+
+---
+
+## 3. Prefect (2018)
+
+| Attribute | Details |
+|-----------|---------|
+| **Created by** | Prefect Technologies |
+| **Category** | Workflow Orchestration |
+| **Open Source** | ✅ Yes (Apache 2.0) |
+| **Self-Hosted** | ✅ Yes (Prefect Server), or use Prefect Cloud (SaaS) |
+| **Language** | Python |
+
+**What it does:** Modern orchestrator designed as a "second-generation" alternative to Airflow. More Pythonic, dynamic, and easier to test locally.
+
+```python
+# Prefect flow example
+from prefect import flow, task
+
+@task
+def extract():
+    return {"data": [1, 2, 3]}
+
+@task
+def transform(data):
+    return [x * 2 for x in data["data"]]
+
+@flow
+def my_pipeline():
+    raw = extract()
+    result = transform(raw)
+    return result
+```
+
+**Pros:** Native Python (just decorators), dynamic workflows, easy local testing, modern UI.  
+**Cons:** Smaller ecosystem than Airflow, younger project.
+
+---
+
+## 4. SQLMesh (2022)
+
+| Attribute | Details |
+|-----------|---------|
+| **Created by** | Tobiko Data (founded by ex-Airbnb engineers) |
+| **Category** | Data Transformation |
+| **Open Source** | ✅ Yes (Apache 2.0) |
+| **Self-Hosted** | ✅ Yes |
+| **Language** | SQL or Python |
+
+**What it does:** Modern alternative to dbt with **virtual data environments**, **incremental-by-default** models, and **column-level lineage**. Key innovation: you can test changes without copying data.
+
+```sql
+-- models/stg_patients.sql
+MODEL (
+    name staging.stg_patients,
+    kind INCREMENTAL_BY_TIME_RANGE (
+        time_column admission_date
+    )
+);
+
+SELECT
+    patient_id,
+    UPPER(name) as patient_name,
+    admission_date
+FROM raw.patients
+WHERE admission_date BETWEEN @start_date AND @end_date
+```
+
+**Pros:** Virtual environments (no data copy for testing), better CI/CD, Python model support, backwards-compatible with dbt.  
+**Cons:** Newest tool (smaller community), still maturing.
+
+---
+
+## Summary Table
+
+| Tool | Year | Category | Open Source | Self-Hosted | Primary Language |
+|------|------|----------|-------------|-------------|------------------|
+| **Airflow** | 2014 | Orchestration | ✅ | ✅ | Python |
+| **dbt** | 2016 | Transformation | ✅ (core) | ✅ | SQL |
+| **Prefect** | 2018 | Orchestration | ✅ | ✅ | Python |
+| **SQLMesh** | 2022 | Transformation | ✅ | ✅ | SQL/Python |
+
+---
+
+## How They Work Together
+
+A common modern data stack might combine these:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     DATA PIPELINE FLOW                          │
+└─────────────────────────────────────────────────────────────────┘
+
+  Data Sources          Orchestrator           Transformation        Warehouse
+ ┌──────────┐         ┌─────────────┐         ┌─────────────┐      ┌─────────┐
+ │  PACS    │         │             │         │             │      │         │
+ │  RIS     │────────►│  Airflow    │────────►│  dbt        │─────►│ BigQuery│
+ │  EMR     │         │    or       │         │    or       │      │   or    │
+ │  DICOM   │         │  Prefect    │         │  SQLMesh    │      │Snowflake│
+ └──────────┘         │             │         │             │      │         │
+                      │ (schedules) │         │ (transforms)│      │         │
+                      └─────────────┘         └─────────────┘      └─────────┘
+```
+
+---
+
+## Recommendation for Your Context
+
+Given your radiology/data science background:
+
+1. **Start with dbt** if you want to learn SQL-based transformation patterns — it's the industry standard and has excellent learning resources.
+
+2. **Consider SQLMesh** if you're starting fresh and want more modern features (especially virtual environments for testing).
+
+3. **Learn Prefect over Airflow** if you want orchestration — it's more Pythonic and easier to get started with locally on your Mac.
