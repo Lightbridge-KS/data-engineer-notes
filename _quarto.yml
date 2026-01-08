@@ -23,7 +23,11 @@ book:
           href: "contents/data_architect/OLAP-radiology-architect.qmd"
         - text: DataHub
           href: "contents/data_architect/datahub.qmd"
-    - part: MinIO
+    - part: RDW
+      chapters: 
+        - text: RDW data transfer
+          href: "contents/rdw/rdw-data-transfer-naive-to-mature.qmd"
+    - part: Data Lake
       chapters: 
         - "contents/minio/minio-cheatsheet.qmd"
     - part: Workflow

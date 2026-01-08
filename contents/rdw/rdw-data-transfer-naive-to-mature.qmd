@@ -1,0 +1,255 @@
+---
+title: "Data Transfer & Export: Naive to Mature Solutions"
+---
+
+Here's a progression of approaches for copying relational data between data warehouses:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    DATA TRANSFER MATURITY SPECTRUM                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  NAIVE                                                              MATURE  │
+│    │                                                                   │    │
+│    ▼                                                                   ▼    │
+│  ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐  ┌─────┐     │
+│  │ CSV │→ │ SQL │→ │ CLI │→ │ FDW │→ │ ETL │→ │ CDC │→ │Kafka│→ │Cloud│     │
+│  │Dump │  │Dump │  │Script│ │     │  │Tools│  │     │  │     │  │ DMS │     │
+│  └─────┘  └─────┘  └─────┘  └─────┘  └─────┘  └─────┘  └─────┘  └─────┘     │
+│                                                                             │
+│  ◄── Manual, Ad-hoc ──►  ◄── Automated ──►  ◄── Real-time/Enterprise ──►    │ 
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 1. Manual File Export/Import (Most Naive)
+
+**How:** Export to CSV/JSON, manually transfer, import to target.
+
+```sql
+-- Export from PostgreSQL
+COPY my_table TO '/path/to/file.csv' WITH CSV HEADER;
+
+-- Import to target
+COPY my_table FROM '/path/to/file.csv' WITH CSV HEADER;
+```
+
+| Pros | Cons |
+|------|------|
+| Simple, no setup | Manual, error-prone |
+| Works across any DB | No automation |
+| | Schema not preserved |
+
+---
+
+## 2. SQL Dump (pg_dump / mysqldump)
+
+**How:** Native database backup tools that export schema + data.
+
+```bash
+# PostgreSQL full dump
+pg_dump -h source_host -U user -d mydb > backup.sql
+
+# Restore to another PostgreSQL
+psql -h target_host -U user -d mydb < backup.sql
+
+# For cross-DB: use pg_dump with --inserts for compatibility
+pg_dump --inserts --no-owner mydb > portable_backup.sql
+```
+
+| Pros | Cons |
+|------|------|
+| Preserves schema | Same DB vendor only (mostly) |
+| Atomic snapshot | Full dump each time |
+| Built-in tool | No incremental sync |
+
+---
+
+## 3. Custom Scripts (Python/SQL)
+
+**How:** Write scripts using database connectors to read and write.
+
+```python
+import psycopg2
+import pyodbc  # or target DB connector
+
+# Read from source
+src_conn = psycopg2.connect("host=src dbname=mydb ...")
+src_cur = src_conn.cursor()
+src_cur.execute("SELECT * FROM my_table")
+rows = src_cur.fetchall()
+
+# Write to target
+tgt_conn = pyodbc.connect("Driver={...};Server=tgt;...")
+tgt_cur = tgt_conn.cursor()
+tgt_cur.executemany("INSERT INTO my_table VALUES (?, ?, ?)", rows)
+tgt_conn.commit()
+```
+
+| Pros | Cons |
+|------|------|
+| Flexible, cross-DB | Manual coding |
+| Can add transformations | Error handling is your job |
+| Schedulable (cron) | Doesn't scale well |
+
+---
+
+## 4. Foreign Data Wrappers (FDW)
+
+**How:** PostgreSQL can query remote databases as if local.
+
+```sql
+-- In PostgreSQL target
+CREATE EXTENSION postgres_fdw;
+
+CREATE SERVER source_server
+  FOREIGN DATA WRAPPER postgres_fdw
+  OPTIONS (host 'source_host', dbname 'mydb', port '5432');
+
+CREATE USER MAPPING FOR local_user
+  SERVER source_server
+  OPTIONS (user 'remote_user', password 'xxx');
+
+-- Import schema
+IMPORT FOREIGN SCHEMA public 
+  FROM SERVER source_server 
+  INTO local_schema;
+
+-- Now copy data
+INSERT INTO local_table SELECT * FROM foreign_table;
+```
+
+| Pros | Cons |
+|------|------|
+| SQL-native | PostgreSQL-centric |
+| Can join across DBs | Network latency |
+| No middleware | Still manual trigger |
+
+---
+
+## 5. ETL Tools (Airflow, dbt, Airbyte)
+
+**How:** Orchestrated pipelines with scheduling, logging, and retry logic.
+
+```
+┌──────────────┐      ┌──────────────┐      ┌──────────────┐
+│   Source     │      │  ETL Tool    │      │   Target     │
+│  PostgreSQL  │─────►│  (Airflow/   │─────►│  Snowflake/  │
+│              │      │   Airbyte)   │      │  BigQuery    │
+└──────────────┘      └──────────────┘      └──────────────┘
+                            │
+                     ┌──────┴──────┐
+                     │  Features:  │
+                     │ - Scheduling│
+                     │ - Logging   │
+                     │ - Retry     │
+                     │ - Transform │
+                     └─────────────┘
+```
+
+| Pros | Cons |
+|------|------|
+| Automated, scheduled | Setup complexity |
+| Built-in monitoring | Learning curve |
+| Handles transformations | Infrastructure needed |
+
+**Popular Tools:**
+- **Airbyte** – Open-source, 300+ connectors
+- **Fivetran** – Managed, easy setup
+- **dbt** – Transform layer (ELT pattern)
+
+---
+
+## 6. Change Data Capture (CDC)
+
+**How:** Capture only changes (INSERT/UPDATE/DELETE) from source DB logs.
+
+```
+┌─────────────┐    WAL/Binlog    ┌──────────────┐    ┌─────────────┐
+│  PostgreSQL │────────────────► │   Debezium   │───►│   Target    │
+│   (Source)  │                  │  (CDC Tool)  │    │     DB      │
+└─────────────┘                  └──────────────┘    └─────────────┘
+       │                               │
+       │  Only changes captured        │ Near real-time
+       └───────────────────────────────┘
+```
+
+```sql
+-- PostgreSQL: Enable logical replication
+ALTER SYSTEM SET wal_level = 'logical';
+-- Then configure Debezium connector
+```
+
+| Pros | Cons |
+|------|------|
+| Near real-time | Complex setup |
+| Only changes (efficient) | Requires DB config |
+| No full scans | Schema evolution tricky |
+
+---
+
+## 7. Streaming (Kafka + Connectors)
+
+**How:** Publish DB changes to Kafka topics, consume at target.
+
+```
+┌─────────┐    ┌───────────┐    ┌─────────┐    ┌───────────┐    ┌─────────┐
+│ Source  │───►│ Debezium  │───►│  Kafka  │───►│  Sink     │───►│ Target  │
+│   DB    │    │ Connector │    │ Cluster │    │ Connector │    │   DB    │
+└─────────┘    └───────────┘    └─────────┘    └───────────┘    └─────────┘
+                                     │
+                              Multiple consumers
+                              can subscribe
+```
+
+| Pros | Cons |
+|------|------|
+| Decoupled architecture | High infrastructure cost |
+| Multiple consumers | Operational complexity |
+| Exactly-once semantics | Overkill for simple use |
+
+---
+
+## 8. Cloud-Native Migration Services (Most Mature)
+
+**How:** Managed services handle everything: schema, data, ongoing sync.
+
+| Service | Provider |
+|---------|----------|
+| **AWS DMS** | Amazon Database Migration Service |
+| **GCP Datastream** | Google Cloud |
+| **Azure Data Factory** | Microsoft Azure |
+
+```
+┌─────────────┐                              ┌─────────────┐
+│   Source    │         Cloud Service        │   Target    │
+│ PostgreSQL  │◄────────────────────────────►│  BigQuery/  │
+│  (on-prem)  │    - Schema conversion       │  Redshift   │
+└─────────────┘    - Full load + CDC         └─────────────┘
+                   - Monitoring dashboard
+                   - Auto-scaling
+```
+
+| Pros | Cons |
+|------|------|
+| Fully managed | Vendor lock-in |
+| Handles heterogeneous DBs | Cost at scale |
+| Built-in monitoring | Cloud dependency |
+
+---
+
+## Summary: When to Use What?
+
+```
+┌────────────────────┬─────────────────────────────────────────────────────┐
+│     Scenario       │              Recommended Approach                   │
+├────────────────────┼─────────────────────────────────────────────────────┤
+│ One-time migration │ pg_dump / SQL dump                                  │
+│ Ad-hoc analysis    │ CSV export or FDW                                   │
+│ Scheduled batch    │ ETL tools (Airbyte, Airflow)                        │
+│ Near real-time     │ CDC (Debezium)                                      │
+│ Enterprise scale   │ Kafka + CDC or Cloud DMS                            │
+│ Cross-cloud sync   │ Cloud-native services (AWS DMS, GCP Datastream)     │
+└────────────────────┴─────────────────────────────────────────────────────┘
+```
