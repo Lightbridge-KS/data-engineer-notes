@@ -1,0 +1,303 @@
+---
+title: "Data Orchestration Tools Comparison: Airflow vs Prefect vs Dagster"
+---
+
+
+### High-Level Architecture Comparison
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        ORCHESTRATION PARADIGMS                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  AIRFLOW (Task-Centric)        PREFECT (Flow-Centric)    DAGSTER (Asset-Centric)
+│  ========================      =====================     =====================
+│                                                                             │
+│   ┌───┐    ┌───┐               @flow                     ┌─────────────┐   │
+│   │T1 │───►│T2 │               def my_flow():            │  Asset A    │   │
+│   └───┘    └───┘                  task_a()               │  (Table)    │   │
+│     │        │                    task_b()               └──────┬──────┘   │
+│     ▼        ▼                                                  │          │
+│   ┌───┐    ┌───┐               Pythonic & Dynamic        ┌──────▼──────┐   │
+│   │T3 │───►│T4 │               Runtime decisions         │  Asset B    │   │
+│   └───┘    └───┘                                         │  (Model)    │   │
+│                                                          └─────────────┘   │
+│   DAG = Task Dependencies      Flow = Python Function    Graph = Data Lineage
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 1. Apache Airflow
+
+### Core Characteristics
+
+| Aspect | Details |
+|--------|---------|
+| **Open Source** | Yes, Apache License 2.0 |
+| **Self-Hosted** | Yes, full self-hosting supported |
+| **Philosophy** | Task-centric, DAG-based workflow orchestration |
+| **Maturity** | Most mature (since 2014), battle-tested |
+| **Community** | 320M downloads in 2024, 10x more than nearest competitor |
+
+### Pricing Model
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    AIRFLOW DEPLOYMENT OPTIONS                    │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Self-Hosted OSS          Managed Services                       │
+│  ───────────────          ─────────────────                      │
+│  Cost: Infrastructure     AWS MWAA: ~$0.49/hr (small env)        │
+│  only (K8s/VMs)           GCP Composer: ~$0.35/hr (dev tier)     │
+│                           Astronomer: Task-based pricing         │
+│  Full Control             Semi-managed to Fully-managed          │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Best Use Cases
+- Enterprise ETL pipelines with complex scheduling
+- Organizations with existing Airflow expertise
+- Heavy batch processing with cron-like schedules
+- Multi-team environments requiring proven stability
+- 30% of users now leverage it for MLOps workflows, and 10% for GenAI applications
+
+### Key Integrations
+
+| Category | Tools |
+|----------|-------|
+| **Data Warehouses** | Snowflake, BigQuery, Redshift, Databricks |
+| **Transformation** | dbt, Spark, Pandas |
+| **Data Lakes** | S3, GCS, Azure Data Lake, Delta Lake |
+| **Cloud Services** | AWS (native), GCP (native), Azure |
+| **Ingestion** | Fivetran, Airbyte, custom operators |
+
+---
+
+## 2. Prefect
+
+### Core Characteristics
+
+| Aspect | Details |
+|--------|---------|
+| **Open Source** | Yes, Apache License 2.0 (Prefect OSS) |
+| **Self-Hosted** | Yes, full self-hosting or hybrid model |
+| **Philosophy** | "Negative engineering" - minimal boilerplate, Pythonic |
+| **Maturity** | Modern (since 2018), rapid growth |
+| **Community** | Growing from 300K to 1.8M downloads per week since Prefect 3.0 |
+
+### Pricing Model
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    PREFECT PRICING TIERS (2025)                  │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Open Source (Free)     Hobby (Free)        Starter ($100/mo)   │
+│  ─────────────────      ───────────         ─────────────────   │
+│  Self-hosted only       2 users             3 users             │
+│  No limits              5 workflows         15 workflows        │
+│  Full control           Serverless only     Own infra + credits │
+│                                                                  │
+│  Team ($400/mo)         Enterprise (Custom)                      │
+│  ─────────────          ───────────────────                      │
+│  10 users               SSO, RBAC                               │
+│  Unlimited workflows    Custom SLAs                             │
+│  Priority support       Dedicated support                       │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Best Use Cases
+- Small to mid-sized teams wanting quick setup
+- Cloud-native, dynamic workflows with runtime decisions
+- Teams preferring pure Python development experience
+- Event-driven pipelines requiring robust failure handling
+- Robust failure handling and comprehensive event-based pipelines
+
+### Key Integrations
+
+| Category | Tools |
+|----------|-------|
+| **Data Warehouses** | Snowflake, BigQuery, Redshift |
+| **Transformation** | dbt, Spark, Ray, Dask |
+| **Data Lakes** | S3, GCS, Azure Blob |
+| **Compute** | Kubernetes, AWS ECS, Modal, Lambda |
+| **Distributed** | Ray, Dask for parallel execution |
+
+---
+
+## 3. Dagster
+
+### Core Characteristics
+
+| Aspect | Details |
+|--------|---------|
+| **Open Source** | Yes, Apache License 2.0 |
+| **Self-Hosted** | Yes, full self-hosting supported |
+| **Philosophy** | Asset-centric, data-aware orchestration |
+| **Maturity** | Modern (since 2018), rapid development |
+| **Community** | 27K commits in 2024, highest development activity |
+
+### Pricing Model
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                    DAGSTER+ PRICING (Credit-Based)               │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Open Source (Free)     Solo (~$10/mo)      Starter (~$100/mo)  │
+│  ─────────────────      ──────────────      ─────────────────   │
+│  Self-hosted            7,500 credits/mo    30,000 credits/mo   │
+│  Full features          1 user              5 users             │
+│  No support SLA         Serverless option   Hybrid option       │
+│                                                                  │
+│  Pro (Custom)           Enterprise (Custom)                      │
+│  ────────────           ───────────────────                      │
+│  Higher limits          SSO, RBAC, Insights                     │
+│  Branch deployments     Dedicated support                       │
+│                                                                  │
+│  Note: 1 credit = 1 asset materialization or op execution       │
+│        Serverless: $0.0005/min execution time                   │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Best Use Cases
+- Data-centric pipelines where lineage and asset tracking matter
+- ML pipelines with strong testing/observability needs
+- Teams that think in "data assets" rather than "tasks"
+- dbt-heavy workflows (excellent native integration)
+- Organizations prioritizing data quality and governance
+
+### Key Integrations
+
+| Category | Tools |
+|----------|-------|
+| **Data Warehouses** | Snowflake, BigQuery, DuckDB |
+| **Transformation** | dbt (best-in-class integration), Spark, Pandas, Polars |
+| **Data Lakes** | Delta Lake, S3, GCS, Azure |
+| **ML/AI** | MLflow, Databricks, W&B |
+| **Ingestion** | Fivetran, dlt, Airbyte, Sling |
+
+---
+
+## Comparison Matrix
+
+| Feature | Apache Airflow | Prefect | Dagster |
+|---------|---------------|---------|---------|
+| **Open Source** | ✅ Apache 2.0 | ✅ Apache 2.0 | ✅ Apache 2.0 |
+| **Self-Hosted** | ✅ Full | ✅ Full + Hybrid | ✅ Full + Hybrid |
+| **Managed Cloud** | MWAA, Composer, Astronomer | Prefect Cloud | Dagster+ |
+| **Free Tier (Managed)** | ❌ | ✅ Hobby (2 users) | ✅ Solo (~$10/mo) |
+| **Pricing Model** | Pay-per-hour (managed) | Seat-based + credits | Credit-based (per materialization) |
+| **Starting Price** | ~$350/mo (MWAA small) | $100/mo (Starter) | ~$120/yr (Solo) |
+| **Core Paradigm** | Task/DAG | Flow/Task | Asset/Graph |
+| **Local Dev Experience** | Moderate | Excellent | Excellent |
+| **Learning Curve** | Steep | Gentle | Moderate |
+| **dbt Integration** | Good (operators) | Good | Excellent (native) |
+| **Data Lineage** | Basic | Basic | First-class |
+| **Testing Support** | External tools | Built-in | First-class |
+| **Dynamic Workflows** | Limited | Excellent | Good |
+| **Event-Driven** | Sensors (polling) | Native triggers | Native sensors |
+| **UI/Observability** | Good | Good | Excellent |
+| **Enterprise Maturity** | Highest | Growing | Growing |
+| **Community Size** | Largest | Medium | Medium |
+
+---
+
+## Integration Ecosystem Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         DATA STACK INTEGRATION                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────┐     ┌─────────────────┐     ┌─────────────────┐           │
+│  │  INGESTION  │     │  ORCHESTRATION  │     │ TRANSFORMATION  │           │
+│  ├─────────────┤     ├─────────────────┤     ├─────────────────┤           │
+│  │ Fivetran    │────►│                 │────►│ dbt             │           │
+│  │ Airbyte     │     │   Airflow  ★★★  │     │ Spark           │           │
+│  │ dlt         │     │   Prefect  ★★   │     │ Python/Pandas   │           │
+│  │ Sling       │     │   Dagster  ★★★  │     │ Polars          │           │
+│  └─────────────┘     │                 │     └─────────────────┘           │
+│                      └────────┬────────┘                                    │
+│                               │                                             │
+│         ┌─────────────────────┼─────────────────────┐                       │
+│         ▼                     ▼                     ▼                       │
+│  ┌─────────────┐     ┌─────────────────┐     ┌─────────────────┐           │
+│  │ DATA LAKES  │     │  WAREHOUSES     │     │   ML/ANALYTICS  │           │
+│  ├─────────────┤     ├─────────────────┤     ├─────────────────┤           │
+│  │ Delta Lake  │     │ Snowflake       │     │ Databricks      │           │
+│  │ S3/GCS/ADLS │     │ BigQuery        │     │ MLflow          │           │
+│  │ Iceberg     │     │ Redshift        │     │ W&B             │           │
+│  │ Hudi        │     │ DuckDB          │     │ Ray             │           │
+│  └─────────────┘     └─────────────────┘     └─────────────────┘           │
+│                                                                             │
+│  ★ = Integration depth: ★★★ Excellent  ★★ Good  ★ Basic                    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Recommended Tool by Use Case
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    DECISION FLOWCHART                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  START                                                                      │
+│    │                                                                        │
+│    ▼                                                                        │
+│  ┌─────────────────────────────┐                                            │
+│  │ Do you have existing        │──Yes──► AIRFLOW                            │
+│  │ Airflow infrastructure?     │         (Migration cost is high)           │
+│  └─────────────┬───────────────┘                                            │
+│                │ No                                                         │
+│                ▼                                                            │
+│  ┌─────────────────────────────┐                                            │
+│  │ Is data lineage/quality     │──Yes──► DAGSTER                            │
+│  │ your top priority?          │         (Asset-centric model)              │
+│  └─────────────┬───────────────┘                                            │
+│                │ No                                                         │
+│                ▼                                                            │
+│  ┌─────────────────────────────┐                                            │
+│  │ Small team, want quick      │──Yes──► PREFECT                            │
+│  │ setup with minimal DevOps?  │         (Pythonic simplicity)              │
+│  └─────────────┬───────────────┘                                            │
+│                │ No                                                         │
+│                ▼                                                            │
+│  ┌─────────────────────────────┐                                            │
+│  │ Enterprise scale with       │──Yes──► AIRFLOW                            │
+│  │ complex scheduling needs?   │         (Proven at scale)                  │
+│  └─────────────┬───────────────┘                                            │
+│                │ No                                                         │
+│                ▼                                                            │
+│  ┌─────────────────────────────┐                                            │
+│  │ Heavy dbt user wanting      │──Yes──► DAGSTER                            │
+│  │ tight orchestration?        │         (Best dbt integration)             │
+│  └─────────────┬───────────────┘                                            │
+│                │ No                                                         │
+│                ▼                                                            │
+│        Evaluate all three with PoC                                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Summary Recommendation for Your Context
+
+Given your background (Python intermediate, R advanced, working in healthcare/radiology AI), here's my suggestion:
+
+| If Your Goal Is... | Recommended Tool | Why |
+|-------------------|------------------|-----|
+| **Learning data engineering fundamentals** | **Dagster** | Asset-centric thinking aligns with how data scientists think about data |
+| **Quick prototyping** | **Prefect** | Most Pythonic, lowest barrier to entry |
+| **Career marketability** | **Airflow** | Most widely used in industry |
+| **Healthcare/DICOM pipelines** | **Dagster** | Better data lineage for compliance, works well with dbt |

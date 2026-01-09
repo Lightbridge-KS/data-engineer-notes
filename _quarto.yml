@@ -27,6 +27,8 @@ book:
           href: "contents/cdc/database-rep-cdc.qmd"
         - text: Data pipeline tools
           href: "contents/tools/data-pipeline-tools.qmd"
+        - text: Data Orchestration Tools
+          href: "contents/tools/data-orchestration-tools.qmd"
     - part: RDW
       chapters: 
         - text: RDW data transfer
