@@ -38,6 +38,8 @@ book:
         - "contents/minio/minio-cheatsheet.qmd"
     - part: Workflow
       chapters: 
+        - text: Data pipeline layers
+          href: "contents/workflows/datapipeline-layers.qmd"
         - text: Apache Airflow
           href: "contents/workflows/apache-airflow.qmd"
         - text: Prefect

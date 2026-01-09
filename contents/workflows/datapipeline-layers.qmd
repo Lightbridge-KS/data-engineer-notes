@@ -1,0 +1,132 @@
+---
+title: "Data Pipeline Layers Explained"
+---
+
+Let me break down each layer and how they fit together in a data pipeline.
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        ORCHESTRATION                                │
+│            (Coordinates and schedules the entire flow)              │
+└─────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌──────────────┐    ┌──────────────────┐    ┌──────────────────┐
+│   SOURCES    │───▶│    INGESTION     │───▶│     STORAGE      │
+│  (Raw Data)  │    │  (Data Loading)  │    │  (Data at Rest)  │
+└──────────────┘    └──────────────────┘    └──────────────────┘
+                                                     │
+                                                     ▼
+                                            ┌──────────────────┐
+                                            │  TRANSFORMATION  │
+                                            │ (Clean, Model)   │
+                                            └──────────────────┘
+                                                     │
+                                                     ▼
+                                            ┌──────────────────┐
+                                            │      QUERY       │
+                                            │ (Access & Serve) │
+                                            └──────────────────┘
+```
+
+---
+
+## 1. Ingestion
+
+**What it does:** Moves data from source systems into your data platform. Think of it as the "intake" — pulling data from APIs, databases, files, or streaming sources.
+
+**Key concerns:** Handling different formats, managing rate limits, dealing with schema changes, exactly-once delivery.
+
+| Type | Technologies |
+|------|-------------|
+| Batch | Fivetran, Airbyte, AWS Glue, Azure Data Factory |
+| Streaming | Apache Kafka, Amazon Kinesis, Apache Pulsar, Debezium (CDC) |
+| Custom Scripts | Python + requests/pandas, Singer taps |
+
+---
+
+## 2. Storage
+
+**What it does:** Persists data at rest. This is where your raw and processed data lives. Modern architectures often use a "data lake" for raw data and a "data warehouse" for structured, query-optimized data.
+
+**Key concerns:** Cost, durability, scalability, file formats, partitioning.
+
+| Type | Technologies |
+|------|-------------|
+| Object Storage (Data Lake) | AWS S3, Google Cloud Storage, Azure Blob |
+| Data Warehouse | Snowflake, BigQuery, Redshift, Databricks |
+| Databases | PostgreSQL, DuckDB, ClickHouse |
+| File Formats | Parquet, Delta Lake, Iceberg, Avro |
+
+---
+
+## 3. Transformation
+
+**What it does:** Cleans, enriches, and models the data. This is where raw data becomes analytics-ready — applying business logic, joining tables, aggregating, and structuring into dimensional models.
+
+**Key concerns:** Idempotency, data quality, lineage, testing.
+
+| Approach | Technologies |
+|----------|-------------|
+| SQL-based | dbt (most popular), SQLMesh |
+| Code-based | Apache Spark, pandas, Polars |
+| In-warehouse | Snowflake procedures, BigQuery scripts |
+
+---
+
+## 4. Query
+
+**What it does:** Provides an interface for users and applications to access processed data. This layer serves dashboards, reports, APIs, and ad-hoc analysis.
+
+**Key concerns:** Performance, concurrency, caching, semantic layer.
+
+| Type | Technologies |
+|------|-------------|
+| BI / Visualization | Tableau, Power BI, Looker, Metabase, Superset |
+| Query Engines | Trino, Presto, Athena, Starburst |
+| Semantic Layer | dbt Semantic Layer, Cube.js, Looker modeling |
+| APIs | GraphQL, REST over warehouse |
+
+---
+
+## 5. Orchestration
+
+**What it does:** Schedules, coordinates, and monitors all the above steps. It defines dependencies (run transformation after ingestion completes), handles retries, and provides observability.
+
+**Key concerns:** DAG management, alerting, retry logic, backfills.
+
+| Technologies |
+|--------------|
+| Apache Airflow (most common) |
+| Prefect |
+| Dagster |
+| Mage |
+| Cloud-native: AWS Step Functions, GCP Workflows |
+
+---
+
+## How They Work Together (Example)
+
+Imagine building a radiology analytics pipeline:
+
+```
+1. INGESTION:   Airbyte pulls DICOM metadata from PACS → 
+2. STORAGE:     Lands as Parquet files in S3 (raw layer) → 
+3. TRANSFORM:   dbt cleans, joins with patient data, builds fact tables → 
+4. STORAGE:     Results written to Snowflake (curated layer) → 
+5. QUERY:       Metabase dashboard shows study volumes by modality
+          ↑
+      ORCHESTRATION: Airflow runs this daily at 6 AM, alerts on failure
+```
+
+---
+
+## Quick Mental Model
+
+| Layer | Question it Answers |
+|-------|---------------------|
+| Ingestion | "How do I get data in?" |
+| Storage | "Where does data live?" |
+| Transformation | "How do I make data useful?" |
+| Query | "How do users access data?" |
+| Orchestration | "When and in what order does everything run?" |
